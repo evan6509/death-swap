@@ -1,0 +1,58 @@
+plugins {
+    id 'net.fabricmc.fabric-loom' version '1.17.14'
+}
+
+version = "${project.mod_version}+mc${project.minecraft_version}"
+group = 'com.deathswap'
+base { archivesName = 'death-swap' }
+
+repositories { mavenCentral() }
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+}
+
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') { expand version: project.version }
+}
+
+java {
+    withSourcesJar()
+    toolchain { languageVersion = JavaLanguageVersion.of(25) }
+}
+jar { from('LICENSE') }
+
+// The small Java runner checks match rules without requiring a Minecraft server.
+tasks.register('rulesTest', JavaExec) {
+    group = 'verification'
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.deathswap.RulesTests'
+}
+check.dependsOn rulesTest
+tasks.named('test') { enabled = false }
+
+sourceSets {
+    gametest {
+        compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output
+        runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output
+    }
+}
+loom {
+    mods {
+        deathswap { sourceSet sourceSets.main }
+        deathswap_tests { sourceSet sourceSets.gametest }
+    }
+    runs {
+        gametest {
+            server()
+            name 'Death Swap Game Tests'
+            source sourceSets.gametest
+            vmArg '-Dfabric-api.gametest'
+            vmArg "-Dfabric-api.gametest.report-file=${layout.buildDirectory.get()}/gametest-results.xml"
+            runDir 'build/gametest'
+        }
+    }
+}
