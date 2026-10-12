@@ -78,8 +78,8 @@ client-class references and test code.
 
 ## Git workflow
 
-`main` is the integration branch. `codex.development` is the long-lived working
-branch, using the exact spelling with a dot. Routine development is committed
+`main` is the integration branch. `codex/development` is the long-lived working
+branch, matching the user's other repositories. Routine development is committed
 there and reviewed in a pull request into `main`. Merging and publication need
 explicit approval. The included CI workflow builds and tests development
 pushes and pull requests without publishing releases.

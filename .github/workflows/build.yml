@@ -2,7 +2,7 @@ name: Build and test
 
 on:
   push:
-    branches: [main, codex.development]
+    branches: [main, codex/development]
   pull_request:
     branches: [main]
   workflow_dispatch:
