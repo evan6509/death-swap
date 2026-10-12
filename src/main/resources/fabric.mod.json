@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "deathswap",
+  "version": "${version}",
+  "name": "Death Swap",
+  "description": "Timed location swaps, death elimination, and last-player-standing matches.",
+  "authors": ["Evan Chubbuck"],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": { "main": ["com.deathswap.DeathSwapMod"] },
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "26.2",
+    "java": ">=25",
+    "fabric-api": ">=0.154.2"
+  }
+}

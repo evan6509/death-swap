@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "deathswap_tests",
+  "version": "1.0.0",
+  "name": "Death Swap Tests",
+  "environment": "*",
+  "entrypoints": { "fabric-gametest": ["com.deathswap.DeathSwapGameTests"] },
+  "depends": { "deathswap": "*", "fabric-gametest-api-v1": "*" }
+}

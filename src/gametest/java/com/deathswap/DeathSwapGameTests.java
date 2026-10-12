@@ -1,0 +1,250 @@
+package com.deathswap;
+
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import com.mojang.authlib.GameProfile;
+import io.netty.channel.embedded.EmbeddedChannel;
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.Connection;
+import net.minecraft.network.DisconnectionDetails;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.PacketFlow;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.network.CommonListenerCookie;
+import net.minecraft.server.permissions.LevelBasedPermissionSet;
+import net.minecraft.server.permissions.PermissionSet;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.storage.LevelResource;
+import net.minecraft.world.phys.Vec3;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+
+public final class DeathSwapGameTests {
+    @GameTest
+    public void swapsSnapshotsAndKeepsInventories(GameTestHelper helper) {
+        var a = player(helper, 1);
+        var b = player(helper, 3);
+        Vec3 fromA = a.position(), fromB = b.position();
+        a.setYRot(35); b.setYRot(160);
+        a.getInventory().setItem(0, new ItemStack(Items.DIAMOND, 7));
+        b.getInventory().setItem(0, new ItemStack(Items.GOLD_INGOT, 2));
+        a.setDeltaMovement(1, -2, 3);
+        a.fallDistance = 30;
+        PlayerSwapper.swap(List.of(a, b), Map.of(a.getUUID(), b.getUUID(), b.getUUID(), a.getUUID()));
+        helper.assertTrue(a.position().equals(fromB) && b.position().equals(fromA), "Both original snapshots used");
+        helper.assertTrue(a.getYRot() == 160 && b.getYRot() == 35, "Facing follows destination");
+        helper.assertTrue(a.getInventory().getItem(0).is(Items.DIAMOND)
+                && a.getInventory().getItem(0).getCount() == 7, "First inventory kept");
+        helper.assertTrue(b.getInventory().getItem(0).is(Items.GOLD_INGOT), "Second inventory kept");
+        helper.assertTrue(a.getDeltaMovement().equals(Vec3.ZERO) && a.fallDistance == 0, "Carried fall momentum reset");
+        helper.succeed();
+    }
+
+    @GameTest
+    public void threePlayersEachReceiveDistinctLocations(GameTestHelper helper) {
+        var a = player(helper, 1); var b = player(helper, 2); var c = player(helper, 3);
+        Vec3 fromA = a.position(), fromB = b.position(), fromC = c.position();
+        PlayerSwapper.swap(List.of(a, b, c), Map.of(a.getUUID(), b.getUUID(), b.getUUID(), c.getUUID(), c.getUUID(), a.getUUID()));
+        helper.assertTrue(a.position().equals(fromB) && b.position().equals(fromC) && c.position().equals(fromA),
+                "Three-player cycle uses original positions");
+        helper.succeed();
+    }
+
+    @GameTest
+    public void swapsAcrossDimensions(GameTestHelper helper) {
+        var a = player(helper, 1); var b = player(helper, 3);
+        var other = helper.getLevel().getServer().getLevel(Level.NETHER);
+        helper.assertTrue(other != null, "Nether exists");
+        helper.assertTrue(b.teleportTo(other, 0.5, 100, 0.5, Set.of(), 90, 0, true), "Setup moves second player to Nether");
+        Vec3 fromA = a.position(), fromB = b.position();
+        PlayerSwapper.swap(List.of(a, b), Map.of(a.getUUID(), b.getUUID(), b.getUUID(), a.getUUID()));
+        helper.assertTrue(a.level() == other && a.position().equals(fromB), "First player receives Nether location");
+        helper.assertTrue(b.level() == helper.getLevel() && b.position().equals(fromA), "Second player receives Overworld location");
+        a.teleportTo(helper.getLevel(), fromA.x, fromA.y, fromA.z, Set.of(), 0, 0, true);
+        helper.succeed();
+    }
+
+    @GameTest
+    public void invalidSwapDoesNotMoveAnyone(GameTestHelper helper) {
+        var a = player(helper, 1); var b = player(helper, 3);
+        Vec3 fromA = a.position(), fromB = b.position();
+        try {
+            PlayerSwapper.swap(List.of(a, b), Map.of(a.getUUID(), a.getUUID(), b.getUUID(), a.getUUID()));
+            throw new AssertionError("Duplicate destination accepted");
+        } catch (IllegalArgumentException expected) {
+            helper.assertTrue(a.position().equals(fromA) && b.position().equals(fromB), "Rejected before any teleport");
+        }
+        helper.succeed();
+    }
+
+    @GameTest
+    public void timerTriggersSwapAndResets(GameTestHelper helper) throws IOException {
+        var a = player(helper, 1); var b = player(helper, 3);
+        var game = game(helper, List.of(a, b));
+        game.setInterval(10);
+        game.start(List.of(a, b));
+        Vec3 fromA = a.position(), fromB = b.position();
+        for (int tick = 0; tick < 199; tick++) game.tick();
+        helper.assertTrue(a.position().equals(fromA), "Timer does not move players early");
+        game.tick();
+        helper.assertTrue(a.position().equals(fromB) && b.position().equals(fromA), "Timer moves both players");
+        helper.assertTrue(game.status().contains("10 seconds") && game.status().contains("Swaps: 1"), "Timer reset after swap");
+        game.stop("Test complete");
+        helper.succeed();
+    }
+
+    @GameTest
+    public void eliminatedRespawnSpectatesAndStopRestores(GameTestHelper helper) throws IOException {
+        var a = player(helper, 1); var b = player(helper, 2); var c = player(helper, 3);
+        var game = game(helper, List.of(a, b, c));
+        game.start(List.of(a, b, c));
+        a.setHealth(0);
+        game.eliminate(a, "died");
+        a.setHealth(20);
+        game.joinedOrRespawned(a);
+        helper.assertTrue(a.gameMode() == GameType.SPECTATOR, "Eliminated player spectates after respawn");
+        game.tick();
+        helper.assertTrue(game.running() && game.status().contains("2 players remain"), "Two remaining players continue");
+        game.stop("Test stopped");
+        helper.assertTrue(a.gameMode() == GameType.SURVIVAL && !game.running(), "Stop restores survival");
+        helper.succeed();
+    }
+
+    @GameTest
+    public void disconnectEndsMatchAndWinnerStaysSurvival(GameTestHelper helper) throws IOException {
+        var a = player(helper, 1); var b = player(helper, 3);
+        var game = game(helper, List.of(a, b));
+        game.start(List.of(a, b));
+        game.disconnected(a);
+        game.tick();
+        helper.assertTrue(!game.running(), "Last survivor ends the match");
+        helper.assertTrue(a.gameMode() == GameType.SURVIVAL && b.gameMode() == GameType.SURVIVAL,
+                "All online players restored at match end");
+        helper.succeed();
+    }
+
+    @GameTest
+    public void simultaneousDeathsEndWithoutWinner(GameTestHelper helper) throws IOException {
+        var a = player(helper, 1); var b = player(helper, 3);
+        var game = game(helper, List.of(a, b));
+        game.start(List.of(a, b));
+        a.setHealth(0); b.setHealth(0);
+        game.eliminate(a, "died"); game.eliminate(b, "died");
+        helper.assertTrue(game.running(), "Finish is deferred until end of tick");
+        game.tick();
+        helper.assertTrue(!game.running(), "All players eliminated ends the match");
+        helper.succeed();
+    }
+
+    @GameTest
+    public void reconnectAfterRestartRestoresManagedSpectator(GameTestHelper helper) throws IOException {
+        var a = player(helper, 1); var b = player(helper, 2); var c = player(helper, 3);
+        var file = recoveryFile(helper);
+        Map<UUID, ServerPlayer> online = new HashMap<>();
+        for (var player : List.of(a, b, c)) online.put(player.getUUID(), player);
+        var recovery = new SpectatorRecovery(file);
+        var game = new DeathSwapGame(helper.getLevel().getServer(), online::get, recovery);
+        game.start(List.of(a, b, c));
+        game.eliminate(a, "died");
+        online.remove(a.getUUID());
+        game.stop("Test stopped");
+        helper.assertTrue(a.gameMode() == GameType.SPECTATOR && recovery.contains(a.getUUID()), "Offline player retained for recovery");
+        var restarted = new DeathSwapGame(helper.getLevel().getServer(), online::get, new SpectatorRecovery(file));
+        online.put(a.getUUID(), a);
+        restarted.joinedOrRespawned(a);
+        helper.assertTrue(a.gameMode() == GameType.SURVIVAL && new SpectatorRecovery(file).pending().isEmpty(),
+                "Persisted recovery restores player after restart");
+        helper.succeed();
+    }
+
+    @GameTest
+    public void registeredEventsHandleDeathRespawnAndDisconnect(GameTestHelper helper) {
+        var server = helper.getLevel().getServer();
+        var a = player(helper, 1); var b = player(helper, 2); var c = player(helper, 3);
+        var game = DeathSwapMod.game(server);
+        try {
+            game.start(List.of(a, b, c));
+            // Exercise the real death path without newly connected players' spawn protection.
+            a.setHealth(0);
+            a.die(a.damageSources().genericKill());
+            helper.assertTrue(game.status().contains("2 players remain"), "Registered death hook eliminates player");
+            var respawned = server.getPlayerList().respawn(a, false, Entity.RemovalReason.KILLED);
+            helper.assertTrue(respawned.gameMode() == GameType.SPECTATOR, "Registered respawn hook sets spectator mode");
+            // Drive the public Fabric callback, then vanilla's disconnect cleanup.
+            ServerPlayConnectionEvents.DISCONNECT.invoker().onPlayDisconnect(b.connection, server);
+            helper.assertTrue(game.status().contains("1 players remain"), "Registered disconnect hook eliminates player");
+            helper.assertTrue(b.gameMode() == GameType.SURVIVAL, "Disconnect hook does not change mode or send packets");
+            b.connection.onDisconnect(new DisconnectionDetails(Component.literal("Test disconnect")));
+            ServerTickEvents.END_SERVER_TICK.invoker().onEndTick(server);
+            helper.assertTrue(!game.running(), "Registered tick hook resolves the winner");
+            helper.assertTrue(respawned.gameMode() == GameType.SURVIVAL && c.gameMode() == GameType.SURVIVAL,
+                    "Match end restores the respawned player and keeps winner in survival");
+            server.getPlayerList().remove(respawned);
+        } finally { game.stop("Test cleanup"); }
+        helper.succeed();
+    }
+
+    @GameTest
+    public void commandsRequireOperatorPermission(GameTestHelper helper) throws Exception {
+        var player = player(helper, 1);
+        var dispatcher = helper.getLevel().getServer().getCommands().getDispatcher();
+        var operator = player.createCommandSourceStack().withPermission(LevelBasedPermissionSet.GAMEMASTER);
+        var denied = player.createCommandSourceStack().withPermission(PermissionSet.NO_PERMISSIONS);
+        helper.assertTrue(dispatcher.execute("deathswap status", denied) == 1, "Everyone can inspect status");
+        for (String command : List.of("deathswap start", "deathswap stop", "deathswap swap", "deathswap interval 10")) {
+            try {
+                dispatcher.execute(command, denied);
+                throw new AssertionError("Non-operator command allowed: " + command);
+            } catch (com.mojang.brigadier.exceptions.CommandSyntaxException expected) { }
+        }
+        helper.assertTrue(dispatcher.execute("deathswap interval 10", operator) == 1, "Operator can change interval");
+        dispatcher.execute("deathswap interval 300", operator);
+        helper.succeed();
+    }
+
+    private static ServerPlayer player(GameTestHelper helper, int x) {
+        var server = helper.getLevel().getServer();
+        var cookie = CommonListenerCookie.createInitial(new GameProfile(UUID.randomUUID(), "DeathSwapTest" + x), false);
+        var player = new ServerPlayer(server, helper.getLevel(), cookie.gameProfile(), cookie.clientInformation());
+        var connection = new Connection(PacketFlow.SERVERBOUND);
+        var channel = new EmbeddedChannel(connection);
+        server.getPlayerList().placeNewPlayer(connection, player, cookie);
+        helper.runBeforeTestEnd(() -> {
+            server.getPlayerList().remove(player);
+            channel.close();
+            player.discard();
+        });
+        player.setGameMode(GameType.SURVIVAL);
+        Vec3 pos = Vec3.atBottomCenterOf(helper.absolutePos(new BlockPos(x, 2, 1)));
+        player.teleportTo(helper.getLevel(), pos.x, pos.y, pos.z, Set.of(), 0, 0, true);
+        return player;
+    }
+
+    private static DeathSwapGame game(GameTestHelper helper, List<ServerPlayer> players) throws IOException {
+        Map<UUID, ServerPlayer> online = new HashMap<>();
+        for (var player : players) online.put(player.getUUID(), player);
+        return new DeathSwapGame(helper.getLevel().getServer(), online::get, new SpectatorRecovery(recoveryFile(helper)));
+    }
+
+    private static java.nio.file.Path recoveryFile(GameTestHelper helper) {
+        var file = helper.getLevel().getServer().getWorldPath(LevelResource.ROOT).resolve("test-spectators-" + UUID.randomUUID() + ".txt");
+        helper.runBeforeTestEnd(() -> {
+            try { Files.deleteIfExists(file); }
+            catch (IOException e) { throw new UncheckedIOException(e); }
+        });
+        return file;
+    }
+}
