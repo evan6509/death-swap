@@ -33,8 +33,9 @@ player dies in the same server tick, the match ends in a draw. Late joiners do
 not enter an existing match, and eliminated players cannot rejoin it.
 
 Players keep their own inventory, health, hunger, and effects when swapping.
-Swaps dismount and wake players, reset movement and accumulated fall distance,
-and preserve dangerous destinations. Teleport failure stops the match after
+Swaps wake sleeping players before capturing destination positions, dismount
+players, reset movement and accumulated fall distance, and preserve dangerous
+destinations. Teleport failure stops the match after
 attempting to restore the original positions. If a player is transferring
 dimensions, the swap waits for that transfer to finish.
 

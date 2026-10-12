@@ -6,6 +6,7 @@ import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import com.mojang.authlib.GameProfile;
 import io.netty.channel.embedded.EmbeddedChannel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.Connection;
 import net.minecraft.network.DisconnectionDetails;
@@ -17,9 +18,13 @@ import net.minecraft.server.permissions.LevelBasedPermissionSet;
 import net.minecraft.server.permissions.PermissionSet;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.BedBlock;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.properties.BedPart;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.phys.Vec3;
 
@@ -50,6 +55,46 @@ public final class DeathSwapGameTests {
                 && a.getInventory().getItem(0).getCount() == 7, "First inventory kept");
         helper.assertTrue(b.getInventory().getItem(0).is(Items.GOLD_INGOT), "Second inventory kept");
         helper.assertTrue(a.getDeltaMovement().equals(Vec3.ZERO) && a.fallDistance == 0, "Carried fall momentum reset");
+        helper.succeed();
+    }
+
+    @GameTest
+    public void wakesSleepingPlayersBeforeCapturingDestinations(GameTestHelper helper) {
+        for (int x = 0; x < 3; x++) {
+            for (int z = 0; z < 3; z++) helper.setBlock(new BlockPos(x, 0, z), Blocks.STONE);
+        }
+        var foot = new BlockPos(0, 1, 1);
+        var head = foot.east();
+        var bed = Blocks.BED.red().defaultBlockState().setValue(BedBlock.FACING, Direction.EAST);
+        helper.setBlock(foot, bed.setValue(BedBlock.PART, BedPart.FOOT));
+        helper.setBlock(head, bed.setValue(BedBlock.PART, BedPart.HEAD));
+        var a = player(helper, 1); var b = player(helper, 3);
+        Vec3 fromB = b.position();
+        a.startSleeping(helper.absolutePos(head));
+        helper.assertTrue(a.isSleeping() && helper.getBlockState(head).getValue(BedBlock.OCCUPIED),
+                "Participant is sleeping in an occupied bed");
+        Vec3 sleepingPosition = a.position();
+        Vec3 awakePosition = BedBlock.findStandUpPosition(a.getType(), helper.getLevel(),
+                helper.absolutePos(head), Direction.EAST, a.getYRot()).orElseThrow();
+        helper.assertTrue(!awakePosition.equals(sleepingPosition), "Wake-up changes the destination position");
+
+        try {
+            PlayerSwapper.swap(List.of(a, b), Map.of(a.getUUID(), a.getUUID(), b.getUUID(), a.getUUID()));
+            throw new AssertionError("Invalid swap accepted");
+        } catch (IllegalArgumentException expected) {
+            helper.assertTrue(a.isSleeping() && a.position().equals(sleepingPosition)
+                    && b.position().equals(fromB) && helper.getBlockState(head).getValue(BedBlock.OCCUPIED),
+                    "Rejected swap leaves the sleeper and bed unchanged");
+        }
+
+        PlayerSwapper.swap(List.of(a, b), Map.of(a.getUUID(), b.getUUID(), b.getUUID(), a.getUUID()));
+
+        helper.assertTrue(!a.isSleeping() && a.getSleepingPos().isEmpty() && a.getPose() == Pose.STANDING,
+                "Sleeping state and pose cleared before the swap finishes");
+        helper.assertTrue(!helper.getBlockState(head).getValue(BedBlock.OCCUPIED)
+                && !helper.getBlockState(foot).getValue(BedBlock.OCCUPIED), "Both halves of the original bed released");
+        helper.assertTrue(a.position().equals(fromB), "Woken participant receives the other original position");
+        helper.assertTrue(b.position().equals(awakePosition), "Other participant receives the post-wake position, not the sleep pose");
         helper.succeed();
     }
 

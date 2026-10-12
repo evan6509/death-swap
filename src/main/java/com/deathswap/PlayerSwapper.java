@@ -29,10 +29,8 @@ final class PlayerSwapper {
 
     static void swap(Collection<ServerPlayer> players, Map<UUID, UUID> destinations) {
         Map<UUID, ServerPlayer> byId = new LinkedHashMap<>();
-        Map<UUID, Location> locations = new LinkedHashMap<>();
         for (var player : players) {
             byId.put(player.getUUID(), player);
-            locations.put(player.getUUID(), Location.capture(player));
         }
         if (players.size() < 2 || byId.size() != players.size()
                 || !destinations.keySet().equals(byId.keySet())
@@ -44,7 +42,13 @@ final class PlayerSwapper {
                 throw new IllegalArgumentException("A player cannot swap with themselves.");
             }
         }
-        // Capture every location before moving anyone, including across dimensions.
+        // Waking can move a player beside their bed. Finish all wake-ups before taking snapshots.
+        for (var player : players) {
+            if (player.isSleeping()) player.stopSleepInBed(true, true);
+        }
+        Map<UUID, Location> locations = new LinkedHashMap<>();
+        for (var player : players) locations.put(player.getUUID(), Location.capture(player));
+        // Capture every location before teleporting anyone, including across dimensions.
         try {
             for (var entry : destinations.entrySet()) {
                 if (!locations.get(entry.getValue()).move(byId.get(entry.getKey()))) {
