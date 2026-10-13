@@ -25,6 +25,9 @@ final class DeathSwapGame {
     private final List<String> pendingAnnouncements = new ArrayList<>();
     private MatchRules match;
     private int intervalSeconds = 300;
+    private boolean paused;
+    private boolean managedNetwork;
+    private String managedStatus;
 
     DeathSwapGame(MinecraftServer server) throws IOException {
         this(server, id -> server.getPlayerList().getPlayer(id),
@@ -39,6 +42,12 @@ final class DeathSwapGame {
     }
 
     boolean running() { return match != null; }
+    boolean paused() { return paused; }
+    void setPaused(boolean value) { paused = value; }
+    boolean isManagedNetwork() { return managedNetwork; }
+    void setManagedNetwork(boolean value) { managedNetwork = value; }
+    void setManagedStatus(String value) { managedStatus = value; }
+    boolean isActiveParticipant(UUID player) { return match != null && match.isAlive(player); }
 
     void setInterval(int seconds) {
         if (running()) throw new IllegalStateException("Stop the match before changing its interval.");
@@ -61,6 +70,7 @@ final class DeathSwapGame {
         names.clear();
         for (var player : players) names.put(player.getUUID(), player.getName().getString());
         match = next;
+        paused = false;
         broadcast("Started with " + players.size() + " players. Swaps every " + intervalSeconds + " seconds.");
     }
 
@@ -86,7 +96,7 @@ final class DeathSwapGame {
     }
 
     void tick() {
-        if (match == null) return;
+        if (match == null || paused) return;
         for (String announcement : pendingAnnouncements) broadcast(announcement);
         pendingAnnouncements.clear();
         reconcile();
@@ -101,6 +111,7 @@ final class DeathSwapGame {
 
     void swapNow() {
         if (match == null) throw new IllegalStateException("No Death Swap match is running.");
+        if (paused) throw new IllegalStateException("Death Swap round is paused while players reconnect or transfer.");
         reconcile();
         if (finishIfNeeded()) return;
         var players = match.alive().stream().map(lookup).toList();
@@ -139,6 +150,7 @@ final class DeathSwapGame {
     void stop(String message) {
         boolean hadMatch = match != null;
         match = null;
+        paused = false;
         names.clear();
         pendingAnnouncements.clear();
         restorePlayers(recovery.pending().stream().map(lookup).filter(java.util.Objects::nonNull).toList());
@@ -146,13 +158,14 @@ final class DeathSwapGame {
     }
 
     String status() {
+        if (managedStatus != null) return managedStatus;
         if (match == null) return "No match running. Swap interval: " + intervalSeconds + " seconds.";
         return match.alive().size() + " players remain: "
                 + String.join(", ", match.alive().stream().map(names::get).toList())
                 + ". Next swap in " + match.secondsRemaining() + " seconds. Swaps: " + match.swaps() + ".";
     }
 
-    private void spectate(ServerPlayer player) {
+    void spectate(ServerPlayer player) {
         try {
             // Persist before changing player data, including for disconnects and crashes.
             recovery.add(player.getUUID());
@@ -162,7 +175,7 @@ final class DeathSwapGame {
         }
     }
 
-    private void restore(ServerPlayer player) {
+    void restore(ServerPlayer player) {
         restorePlayers(List.of(player));
     }
 

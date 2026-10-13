@@ -3,6 +3,15 @@
 A server-side Fabric minigame for **Minecraft 26.2** and **Java 25**. Build traps,
 swap locations, and try to be the last player alive.
 
+For automatic fresh-seed rounds like Linked Hardcore, use the included
+[Docker setup](docs/DOCKER.md): one proxy, two or more backend servers, and one
+address for players. The first participant death ends the round and moves
+everyone to a prepared fresh world. The vacated backend regenerates while the
+group plays its next round. New rounds start automatically after the group
+arrives and the start countdown finishes. Each fresh round starts with new
+player data and inventory. The single-server instructions below retain the
+ordinary elimination/last-survivor mode.
+
 Install `death-swap-1.0.0+mc26.2.jar` and Fabric API `0.154.2+26.2` on a Fabric
 server with Loader `0.19.3` or newer. Players can connect without installing
 Death Swap on their clients. For a singleplayer/LAN world, install the mod and
@@ -46,6 +55,12 @@ themselves do not resume after a restart.
 
 ## Commands
 
+In Docker mode, rounds start and rotate automatically. `/deathswap status` and
+`/deathswapnetwork status` report gameplay and proxy progress; `/deathswap swap`
+can force a location swap during an active, unpaused round. Start, stop, and
+interval commands are for ordinary single-server mode. Change Docker timing in
+`.env` and recreate the services with `./docker/compose.py up -d`.
+
 | Command | Purpose | Permission |
 | --- | --- | --- |
 | `/deathswap` or `/deathswap status` | Show survivors, time remaining, and swaps | Everyone |
@@ -66,16 +81,25 @@ not required.
 ```sh
 ./gradlew --no-daemon build runGametest
 python3 scripts/verify_mod_jar.py
+python3 scripts/verify_proxy_jar.py
+python3 docker/test_runtime.py
 ```
 
 The distributable is `build/libs/death-swap-1.0.0+mc26.2.jar`. Do not install the
 sources JAR. The build runs standalone match-rule and spectator-recovery
 checks. GameTests exercise real server players over mock network connections,
 including location snapshots, dimensions, inventories, timers, elimination,
-recovery, and command permissions. These checks do not establish human
+recovery, managed-round arrivals, disconnect pauses, resets, restart handling,
+and command permissions. The Velocity plugin has separate transfer/controller
+tests; the Python suite checks the reset supervisor with disposable process and
+filesystem fixtures. These checks do not establish human
 multiplayer gameplay validation. The dedicated-server tests load the mod in
 Fabric's server environment; the production JAR is also checked for accidental
 client-class references and test code.
+
+The proxy artifact is `velocity-plugin/build/libs/death-swap-proxy-1.0.0.jar`.
+Docker builds and installs both artifacts plus the server/proxy dependencies.
+Neither proxy deployment nor container startup is needed for ordinary mod use.
 
 ## Git workflow
 

@@ -5,3 +5,7 @@ out/
 .idea/
 *.iml
 .DS_Store
+.env
+docker-data/
+__pycache__/
+*.pyc

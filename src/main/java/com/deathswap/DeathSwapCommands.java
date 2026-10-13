@@ -17,15 +17,15 @@ final class DeathSwapCommands {
                     .executes(DeathSwapCommands::status)
                     .then(Commands.literal("status").executes(DeathSwapCommands::status));
             root.then(Commands.literal("start").requires(DeathSwapCommands::operator)
-                    .executes(context -> execute(context, game -> game.start(
+                    .executes(context -> executeStandalone(context, game -> game.start(
                             context.getSource().getServer().getPlayerList().getPlayers().stream()
                                     .filter(p -> p.isAlive() && p.gameMode() == GameType.SURVIVAL).toList())))
                     .then(Commands.argument("players", EntityArgument.players()).executes(context -> {
                         var players = EntityArgument.getPlayers(context, "players");
-                        return execute(context, game -> game.start(players));
+                        return executeStandalone(context, game -> game.start(players));
                     })));
             root.then(Commands.literal("stop").requires(DeathSwapCommands::operator)
-                    .executes(context -> execute(context, game -> {
+                    .executes(context -> executeStandalone(context, game -> {
                         if (!game.running()) throw new IllegalStateException("No Death Swap match is running.");
                         game.stop("Match stopped by an operator.");
                     })));
@@ -33,7 +33,7 @@ final class DeathSwapCommands {
                     .executes(context -> execute(context, DeathSwapGame::swapNow)));
             root.then(Commands.literal("interval").requires(DeathSwapCommands::operator)
                     .then(Commands.argument("seconds", IntegerArgumentType.integer(10, 86400))
-                            .executes(context -> execute(context, game -> {
+                            .executes(context -> executeStandalone(context, game -> {
                                 int seconds = IntegerArgumentType.getInteger(context, "seconds");
                                 game.setInterval(seconds);
                                 context.getSource().sendSuccess(() -> Component.literal(
@@ -61,5 +61,15 @@ final class DeathSwapCommands {
             context.getSource().sendFailure(Component.literal(e.getMessage()));
             return 0;
         }
+    }
+
+    private static int executeStandalone(CommandContext<CommandSourceStack> context,
+                                         java.util.function.Consumer<DeathSwapGame> action) {
+        return execute(context, game -> {
+            if (game.isManagedNetwork()) {
+                throw new IllegalStateException("Docker rounds start automatically. Configure their timing in .env and restart the stack.");
+            }
+            action.accept(game);
+        });
     }
 }
