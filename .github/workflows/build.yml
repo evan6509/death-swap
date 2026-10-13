@@ -23,11 +23,20 @@ jobs:
       - name: Build and run server GameTests
         run: ./gradlew --no-daemon build runGametest
       - name: Verify distributable JAR
-        run: python3 scripts/verify_mod_jar.py
+        run: |
+          python3 scripts/verify_mod_jar.py
+          python3 scripts/verify_proxy_jar.py
+      - name: Verify reset supervisor and Compose generation
+        run: |
+          python3 docker/test_runtime.py
+          python3 docker/test_compose.py
+          sh -n docker/entrypoint.sh
       - uses: actions/upload-artifact@v4
         with:
           name: death-swap-mc26.2
-          path: build/libs/death-swap-*.jar
+          path: |
+            build/libs/death-swap-*.jar
+            velocity-plugin/build/libs/death-swap-proxy-*.jar
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()

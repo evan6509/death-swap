@@ -1,0 +1,61 @@
+name: death-swap
+services:
+  proxy:
+    build: .
+    image: death-swap:1.0.0
+    environment:
+      MODE: proxy
+      # compose.py consumes the resolved count before launching services.
+      SERVER_COUNT: ${SERVER_COUNT:-2}
+      BACKEND_SERVER_IDS: a,b
+      FORWARDING_SECRET: ${FORWARDING_SECRET:?Set FORWARDING_SECRET in .env}
+      MC_MEMORY: ${PROXY_MEMORY:-512M}
+      SWAP_INTERVAL_SECONDS: ${SWAP_INTERVAL_SECONDS:-300}
+      MAX_PLAYERS: ${MAX_PLAYERS:-100}
+      VELOCITY_PORT: "25577"
+    ports:
+      - "${VELOCITY_PORT:-25577}:25577"
+    volumes:
+      - deathswap-data:/deathswap
+    restart: unless-stopped
+    stop_grace_period: 45s
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+  server-a:
+    build: .
+    image: death-swap:1.0.0
+    environment:
+      MODE: server
+      SERVER_ID: a
+      EULA: ${EULA:-FALSE}
+      FORWARDING_SECRET: ${FORWARDING_SECRET:?Set FORWARDING_SECRET in .env}
+      MC_MEMORY: ${BACKEND_MEMORY:-3G}
+      SWAP_INTERVAL_SECONDS: ${SWAP_INTERVAL_SECONDS:-300}
+      START_COUNTDOWN_SECONDS: ${START_COUNTDOWN_SECONDS:-5}
+      MAX_PLAYERS: ${MAX_PLAYERS:-100}
+    volumes:
+      - deathswap-data:/deathswap
+    restart: unless-stopped
+    stop_grace_period: 45s
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+  server-b:
+    build: .
+    image: death-swap:1.0.0
+    environment:
+      MODE: server
+      SERVER_ID: b
+      EULA: ${EULA:-FALSE}
+      FORWARDING_SECRET: ${FORWARDING_SECRET:?Set FORWARDING_SECRET in .env}
+      MC_MEMORY: ${BACKEND_MEMORY:-3G}
+      SWAP_INTERVAL_SECONDS: ${SWAP_INTERVAL_SECONDS:-300}
+      START_COUNTDOWN_SECONDS: ${START_COUNTDOWN_SECONDS:-5}
+      MAX_PLAYERS: ${MAX_PLAYERS:-100}
+    volumes:
+      - deathswap-data:/deathswap
+    restart: unless-stopped
+    stop_grace_period: 45s
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+volumes:
+  deathswap-data:

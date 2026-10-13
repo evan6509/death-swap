@@ -1,0 +1,23 @@
+plugins { id 'java' }
+
+group = 'com.deathswap'
+version = rootProject.mod_version
+base { archivesName = 'death-swap-proxy' }
+
+repositories {
+    maven { url = 'https://repo.papermc.io/repository/maven-public/' }
+    mavenCentral()
+}
+dependencies {
+    compileOnly 'com.velocitypowered:velocity-api:4.0.0'
+    annotationProcessor 'com.velocitypowered:velocity-api:4.0.0'
+    compileOnly 'com.google.code.gson:gson:2.11.0'
+    testImplementation 'com.velocitypowered:velocity-api:4.0.0'
+    testImplementation 'com.google.code.gson:gson:2.11.0'
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
+test { useJUnitPlatform() }
