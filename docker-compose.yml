@@ -1,16 +1,17 @@
 name: death-swap
-# compose.py expands the server-a template, retaining a/b world identities.
-x-server-count: ${SERVER_COUNT:-2}
 services:
   proxy:
     build: .
     image: death-swap:1.0.0
     environment:
       MODE: proxy
+      # compose.py consumes the resolved count before launching services.
+      SERVER_COUNT: ${SERVER_COUNT:-2}
       BACKEND_SERVER_IDS: a,b
       FORWARDING_SECRET: ${FORWARDING_SECRET:?Set FORWARDING_SECRET in .env}
       MC_MEMORY: ${PROXY_MEMORY:-512M}
       SWAP_INTERVAL_SECONDS: ${SWAP_INTERVAL_SECONDS:-300}
+      MAX_PLAYERS: ${MAX_PLAYERS:-100}
       VELOCITY_PORT: "25577"
     ports:
       - "${VELOCITY_PORT:-25577}:25577"
@@ -31,6 +32,7 @@ services:
       MC_MEMORY: ${BACKEND_MEMORY:-3G}
       SWAP_INTERVAL_SECONDS: ${SWAP_INTERVAL_SECONDS:-300}
       START_COUNTDOWN_SECONDS: ${START_COUNTDOWN_SECONDS:-5}
+      MAX_PLAYERS: ${MAX_PLAYERS:-100}
     volumes:
       - deathswap-data:/deathswap
     restart: unless-stopped
@@ -48,6 +50,7 @@ services:
       MC_MEMORY: ${BACKEND_MEMORY:-3G}
       SWAP_INTERVAL_SECONDS: ${SWAP_INTERVAL_SECONDS:-300}
       START_COUNTDOWN_SECONDS: ${START_COUNTDOWN_SECONDS:-5}
+      MAX_PLAYERS: ${MAX_PLAYERS:-100}
     volumes:
       - deathswap-data:/deathswap
     restart: unless-stopped

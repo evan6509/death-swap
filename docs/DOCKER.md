@@ -16,7 +16,8 @@ seed; only an authorized round reset changes it.
 
 ## Start
 
-Install Docker Engine with Compose (or Docker Desktop) and Python 3 on the host.
+Install Docker Engine with the Compose v2 plugin (or Docker Desktop) and Python 3
+on the host. The helper checks for `docker compose` v2 before rendering settings.
 The image includes Java 25, Fabric Loader 0.19.3, Fabric API 0.154.2+26.2,
 FabricProxy-Lite v2.12.0, the mod, and Velocity 4.0.0-6 with its proxy plugin.
 The FabricProxy-Lite and Velocity downloads are checksum verified.
@@ -53,6 +54,7 @@ checked-in default pair.
 | `SERVER_COUNT` | `2` | 2–64 Fabric backends; more add ready capacity |
 | `PROXY_MEMORY` | `512M` | Proxy Java heap |
 | `BACKEND_MEMORY` | `3G` | Java heap per backend |
+| `MAX_PLAYERS` | `100` | 1–1024 players; same backend admission and proxy display limit |
 | `SWAP_INTERVAL_SECONDS` | `300` | Location swap interval, 10–86400 seconds |
 | `START_COUNTDOWN_SECONDS` | `5` | Initial and transferred-round countdown, 0–60 seconds |
 | `VELOCITY_PORT` | `25577` | Published host port |
@@ -115,15 +117,19 @@ invalid secrets/settings, or reset metadata that needs operator review.
 
 ```sh
 python3 docker/test_runtime.py
+python3 docker/test_compose.py # Requires Compose v2; renders only, no containers
 sh -n docker/entrypoint.sh
 ./gradlew --no-daemon build runGametest
 python3 scripts/verify_mod_jar.py
+python3 scripts/verify_proxy_jar.py
 ```
 
 The Python checks simulate reset handshakes, stale/mismatched requests, crash
 recovery, seed changes, retained config, symlink refusal, process shutdown, and
-Compose expansion in disposable temporary directories. They never reset a
-real server. GameTests validate backend gameplay, and the proxy tests validate
+Compose expansion in disposable temporary directories. The separate Compose
+check renders the real helper with default, `.env`, and shell settings, without
+starting containers. These checks never reset a real server. GameTests validate
+backend gameplay, and the proxy tests validate
 its coordination rules. These are distinct from building/running containers
 and joining them with real clients. On a Docker host, also check rendered
 services with `./docker/compose.py config --services`, start the deployment,

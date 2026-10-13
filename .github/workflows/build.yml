@@ -29,6 +29,7 @@ jobs:
       - name: Verify reset supervisor and Compose generation
         run: |
           python3 docker/test_runtime.py
+          python3 docker/test_compose.py
           sh -n docker/entrypoint.sh
       - uses: actions/upload-artifact@v4
         with:

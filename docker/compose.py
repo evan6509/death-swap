@@ -13,7 +13,9 @@ from pathlib import Path
 
 def expand_backends(config):
     config = copy.deepcopy(config)
-    raw_count = str(config.pop("x-server-count", "2"))
+    # Compose omits top-level extensions from JSON. A resolved service variable
+    # preserves its shell/.env precedence, and is consumed before deployment.
+    raw_count = str(config["services"]["proxy"]["environment"].pop("SERVER_COUNT"))
     if not re.fullmatch(r"[0-9]+", raw_count) or not 2 <= int(raw_count) <= 64:
         raise ValueError("SERVER_COUNT must be a whole number from 2 to 64")
     count = int(raw_count)
@@ -42,17 +44,18 @@ def main(args=None):
     if args[0].startswith("-"):
         print("Start with a Compose subcommand; use .env for settings.", file=sys.stderr)
         return 2
-    if shutil.which("docker"):
-        compose = ["docker", "compose"]
-    elif shutil.which("docker-compose"):
-        compose = ["docker-compose"]
-    else:
-        print("Docker Compose is required (docker compose or docker-compose).", file=sys.stderr)
+    if not shutil.which("docker"):
+        print("Docker Compose v2 is required; install the docker compose plugin or Docker Desktop.", file=sys.stderr)
         return 1
+    compose = ["docker", "compose"]
 
     root = Path(__file__).resolve().parent.parent
     common = ["--project-directory", str(root)]
     try:
+        version = subprocess.run(compose + ["version", "--short"], capture_output=True, text=True)
+        major = re.match(r"v?([0-9]+)\.", version.stdout.strip())
+        if version.returncode or major is None or int(major.group(1)) < 2:
+            raise ValueError("Docker Compose v2 is required; install or update the docker compose plugin.")
         result = subprocess.run(
             compose + common + ["-f", str(root / "docker-compose.yml"), "config", "--format", "json"],
             cwd=root, capture_output=True, text=True, check=True,
@@ -60,15 +63,12 @@ def main(args=None):
         if result.stderr:
             print(result.stderr, end="", file=sys.stderr)
         config = expand_backends(json.loads(result.stdout))
-        # Rendered secrets remain in a restrictive temporary file outside the
-        # build context; the next pass must preserve literal dollars in secrets.
+        # Compose already escapes literal dollars for reuse as a Compose file.
+        # Keep that output intact and secrets outside the build context.
         with tempfile.TemporaryDirectory(prefix="death-swap-compose-") as temp_dir:
             generated = Path(temp_dir) / "compose.json"
             generated.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
             generated.chmod(0o600)
-            # Compose interpolates again when reading generated JSON. Double
-            # dollar signs for that pass, including resolved environment values.
-            generated.write_text(generated.read_text(encoding="utf-8").replace("$", "$$"), encoding="utf-8")
             return subprocess.run(compose + common + ["-f", str(generated)] + args, cwd=root).returncode
     except subprocess.CalledProcessError as error:
         print(error.stderr or "Could not resolve Compose configuration.", end="", file=sys.stderr)

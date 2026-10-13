@@ -2,6 +2,7 @@
 """All reset checks run against temporary directories and disposable processes."""
 
 import copy
+import io
 import json
 import signal
 import subprocess
@@ -16,6 +17,7 @@ from unittest import mock
 
 import runtime
 import compose
+from test_capacity import CapacityTests
 
 
 class RuntimeTests(unittest.TestCase):
@@ -309,8 +311,9 @@ time.sleep(10)
 
 class ComposeTests(unittest.TestCase):
     def fixture(self, count):
-        return {"x-server-count": str(count), "services": {
-            "proxy": {"environment": {"FORWARDING_SECRET": "private$literal"}},
+        # Compose's JSON model drops top-level extensions, but retains service env.
+        return {"services": {
+            "proxy": {"environment": {"SERVER_COUNT": str(count), "FORWARDING_SECRET": "private$literal"}},
             "server-a": {"environment": {"SERVER_ID": "a", "FORWARDING_SECRET": "private$literal"},
                          "volumes": ["deathswap-data:/deathswap"]},
             "server-b": {"environment": {"SERVER_ID": "b"}},
@@ -327,6 +330,7 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual("s28", config["services"]["server-s28"]["environment"]["SERVER_ID"])
         self.assertEqual("private$literal", config["services"]["server-b"]["environment"]["FORWARDING_SECRET"])
         self.assertNotIn("ports", config["services"]["server-a"])
+        self.assertNotIn("SERVER_COUNT", config["services"]["proxy"]["environment"])
 
     def test_invalid_counts_rejected(self):
         for count in (0, 1, 65, -1, "2.5", "x", ""):
@@ -338,11 +342,15 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(65, len(config["services"]))
         self.assertIn("server-s64", config["services"])
 
-    def test_compose_resolves_env_once_and_escapes_second_pass_outside_context(self):
-        first = subprocess.CompletedProcess([], 0, stdout=json.dumps(self.fixture(3)), stderr="")
+    def test_compose_preserves_resolved_count_and_escaped_secrets_outside_context(self):
+        # Compose has already escaped literal dollars for the second pass.
+        resolved = json.dumps(self.fixture(3)).replace("$", "$$")
+        first = subprocess.CompletedProcess([], 0, stdout=resolved, stderr="")
         observed = {}
 
         def launch(command, **kwargs):
+            if command == ["docker", "compose", "version", "--short"]:
+                return subprocess.CompletedProcess(command, 0, stdout="v2.27.2\n", stderr="")
             if "--format" in command:
                 return first
             path = Path(command[command.index("-f") + 1])
@@ -356,9 +364,37 @@ class ComposeTests(unittest.TestCase):
                 mock.patch.object(compose.subprocess, "run", side_effect=launch):
             self.assertEqual(0, compose.main(["config", "--services"]))
         self.assertEqual(0o600, observed["mode"])
+        self.assertEqual("a,b,c", observed["config"]["services"]["proxy"]["environment"]["BACKEND_SERVER_IDS"])
+        self.assertIn("server-c", observed["config"]["services"])
         self.assertEqual("private$$literal", observed["config"]["services"]["proxy"]["environment"]["FORWARDING_SECRET"])
         self.assertFalse(observed["path"].exists())
         self.assertEqual(["config", "--services"], observed["command"][-2:])
+
+    def test_legacy_standalone_compose_is_rejected_before_rendering(self):
+        def which(name):
+            return "/fake/docker-compose" if name == "docker-compose" else None
+
+        stderr = io.StringIO()
+        with mock.patch.object(compose.shutil, "which", side_effect=which), \
+                mock.patch.object(compose.subprocess, "run") as launch, \
+                mock.patch.object(compose.sys, "stderr", stderr):
+            self.assertEqual(1, compose.main(["up", "-d"]))
+        launch.assert_not_called()
+        self.assertIn("Compose v2", stderr.getvalue())
+
+    def test_missing_legacy_or_unrecognized_plugin_is_rejected_before_rendering(self):
+        for code, version in ((1, ""), (0, "1.29.2"), (0, "unknown")):
+            with self.subTest(code=code, version=version):
+                stderr = io.StringIO()
+                result = subprocess.CompletedProcess([], code, stdout=version, stderr="")
+                with mock.patch.object(compose.shutil, "which", return_value="/fake/docker"), \
+                        mock.patch.object(compose.subprocess, "run", return_value=result) as launch, \
+                        mock.patch.object(compose.sys, "stderr", stderr):
+                    self.assertEqual(1, compose.main(["up", "-d"]))
+                launch.assert_called_once_with(
+                    ["docker", "compose", "version", "--short"], capture_output=True, text=True,
+                )
+                self.assertIn("Compose v2", stderr.getvalue())
 
 
 if __name__ == "__main__":

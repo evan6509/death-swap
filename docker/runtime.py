@@ -127,6 +127,7 @@ class RuntimeConfig:
     velocity_port: int
     java_bin: str
     shutdown_seconds: float = 30.0
+    max_players: int = 100
 
     @classmethod
     def from_env(cls, env=None):
@@ -162,6 +163,7 @@ class RuntimeConfig:
             env_integer(env, "START_COUNTDOWN_SECONDS", 5, 0, 60),
             env_integer(env, "VELOCITY_PORT", 25_577, 1, 65_535),
             env.get("JAVA_BIN", "java"),
+            max_players=env_integer(env, "MAX_PLAYERS", 100, 1, 1_024),
         )
 
 
@@ -329,6 +331,7 @@ class BackendSupervisor:
             "level-name": "world", "level-seed": str(identity["seed"]),
             "gamemode": "survival", "hardcore": "false", "force-gamemode": "true",
             "enforce-secure-profile": "false", "enable-rcon": "false",
+            "max-players": str(self.config.max_players),
         }
         preserved = [line for line in lines if line.split("=", 1)[0].strip() not in overrides]
         atomic_text(properties, "\n".join(preserved + [f"{key}={value}" for key, value in overrides.items()]) + "\n")
@@ -413,7 +416,7 @@ def prepare_proxy(config):
 config-version = "2.8"
 bind = "0.0.0.0:{config.velocity_port}"
 motd = "<#09add3>Death Swap — fresh seeds every round"
-show-max-players = 100
+show-max-players = {config.max_players}
 online-mode = true
 force-key-authentication = true
 prevent-client-proxy-connections = false
