@@ -1,7 +1,7 @@
 plugins { id 'java' }
 
 group = 'com.deathswap'
-version = rootProject.mod_version
+version = rootProject.releaseVersion
 base { archivesName = 'death-swap-proxy' }
 
 repositories {
@@ -21,3 +21,18 @@ dependencies {
 java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
 tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
 test { useJUnitPlatform() }
+
+// Annotation processing embeds this constant in velocity-plugin.json.
+def generatedVersion = layout.buildDirectory.dir('generated/sources/version')
+tasks.register('generateVersion') {
+    inputs.property 'version', project.version
+    outputs.dir generatedVersion
+    doLast {
+        def output = generatedVersion.get().file('com/deathswap/proxy/BuildVersion.java').asFile
+        output.parentFile.mkdirs()
+        output.text = "package com.deathswap.proxy; final class BuildVersion { static final String VERSION = \"${project.version}\"; }\n"
+    }
+}
+sourceSets.main.java.srcDir generatedVersion
+tasks.named('compileJava') { dependsOn 'generateVersion' }
+jar { from(rootProject.file('LICENSE')) }

@@ -22,6 +22,12 @@ The image includes Java 25, Fabric Loader 0.19.3, Fabric API 0.154.2+26.2,
 FabricProxy-Lite v2.12.0, the mod, and Velocity 4.0.0-6 with its proxy plugin.
 The FabricProxy-Lite and Velocity downloads are checksum verified.
 
+The [release downloads](https://github.com/evan6509/death-swap/releases) include
+`death-swap-docker-VERSION+mc26.2.zip` with all sources needed by this setup.
+Extract it before following these instructions. Its `.env.example` selects the
+matching `DEATHSWAP_VERSION`; keep that value when copying to `.env` so the mod,
+proxy, and Docker image use the same release version.
+
 ```sh
 cp .env.example .env
 python3 -c 'import secrets; print(secrets.token_hex(32))'

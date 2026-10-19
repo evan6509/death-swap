@@ -1,9 +1,13 @@
 # syntax=docker/dockerfile:1
 # One Java 25 image runs either the Velocity proxy or a Fabric backend.
 FROM eclipse-temurin:25-jdk AS build
+ARG DEATHSWAP_VERSION=1.0.0
 WORKDIR /src
 COPY . .
-RUN ./gradlew --no-daemon build :velocity-plugin:build
+ENV DEATHSWAP_VERSION=${DEATHSWAP_VERSION}
+RUN ./gradlew --no-daemon build :velocity-plugin:build \
+    && cp "build/libs/death-swap-${DEATHSWAP_VERSION}+mc26.2.jar" /death-swap.jar \
+    && cp "velocity-plugin/build/libs/death-swap-proxy-${DEATHSWAP_VERSION}.jar" /death-swap-proxy.jar
 
 FROM eclipse-temurin:25-jdk AS server-install
 ARG FABRIC_INSTALLER_VERSION=1.1.2
@@ -25,7 +29,7 @@ RUN mkdir -p /install/mods \
     && curl --retry 3 -fsSL -o /install/mods/fabricproxy-lite.jar \
        "https://api.modrinth.com/maven/maven/modrinth/fabricproxy-lite/${FABRIC_PROXY_LITE_VERSION}/fabricproxy-lite-${FABRIC_PROXY_LITE_VERSION}.jar" \
     && echo "${FABRIC_PROXY_LITE_SHA256}  /install/mods/fabricproxy-lite.jar" | sha256sum -c -
-COPY --from=build /src/build/libs/death-swap-1.0.0+mc26.2.jar /install/mods/death-swap.jar
+COPY --from=build /death-swap.jar /install/mods/death-swap.jar
 
 FROM eclipse-temurin:25-jdk AS proxy-install
 ARG VELOCITY_SHA256=4540289f48c83e305fc2f2c495a84d1f4d0b7f360830251e169dd5a208740e70
@@ -44,7 +48,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 \
     && chown deathswap:deathswap /deathswap
 COPY --from=server-install /install /opt/deathswap/server
 COPY --from=proxy-install /velocity.jar /opt/deathswap/velocity.jar
-COPY --from=build /src/velocity-plugin/build/libs/death-swap-proxy-1.0.0.jar /opt/deathswap/death-swap-proxy.jar
+COPY --from=build /death-swap-proxy.jar /opt/deathswap/death-swap-proxy.jar
 COPY docker/entrypoint.sh docker/runtime.py /opt/deathswap/
 RUN chmod +x /opt/deathswap/entrypoint.sh
 ENV MODE=server SERVER_ID=a BACKEND_SERVER_IDS=a,b SHARED_DIR=/deathswap \

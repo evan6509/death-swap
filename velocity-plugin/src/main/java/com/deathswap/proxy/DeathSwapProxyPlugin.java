@@ -25,7 +25,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-@Plugin(id = "deathswap-network", name = "Death Swap Network", version = "1.0.0",
+@Plugin(id = "deathswap-network", name = "Death Swap Network", version = BuildVersion.VERSION,
     description = "Fresh-seed Death Swap round routing and safe backend reset coordination.", authors = {"evan6509"})
 public final class DeathSwapProxyPlugin {
     private final ProxyServer proxy;

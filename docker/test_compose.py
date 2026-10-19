@@ -24,7 +24,7 @@ class ComposeIntegrationTests(unittest.TestCase):
         self.env = {
             key: value for key, value in os.environ.items()
             if not key.startswith("COMPOSE_") and key not in (
-                "SERVER_COUNT", "MAX_PLAYERS", "FORWARDING_SECRET",
+                "SERVER_COUNT", "MAX_PLAYERS", "FORWARDING_SECRET", "DEATHSWAP_VERSION",
             )
         }
         self.settings = f"FORWARDING_SECRET='{self.secret}'\n"
@@ -57,6 +57,14 @@ class ComposeIntegrationTests(unittest.TestCase):
     def test_shell_overrides_dotenv(self):
         self.settings += "SERVER_COUNT=3\nMAX_PLAYERS=64\n"
         self.check_services(self.render(SERVER_COUNT="4", MAX_PLAYERS="80"), ["a", "b", "c", "d"], 80)
+
+    def test_release_build_version_matches_every_service(self):
+        self.settings += "DEATHSWAP_VERSION=1.0.3\nSERVER_COUNT=3\n"
+        for overrides, expected in [({}, "1.0.3"), ({"DEATHSWAP_VERSION": "1.0.4"}, "1.0.4")]:
+            with self.subTest(expected=expected):
+                for service in self.render(**overrides).values():
+                    self.assertEqual(service["build"]["args"]["DEATHSWAP_VERSION"], expected)
+                    self.assertEqual(service["image"], f"death-swap:{expected}")
 
 
 if __name__ == "__main__":

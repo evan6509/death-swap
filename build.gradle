@@ -2,7 +2,8 @@ plugins {
     id 'net.fabricmc.fabric-loom' version '1.17.14'
 }
 
-version = "${project.mod_version}+mc${project.minecraft_version}"
+ext.releaseVersion = System.getenv('DEATHSWAP_VERSION') ?: project.mod_version
+version = "${releaseVersion}+mc${project.minecraft_version}"
 group = 'com.deathswap'
 base { archivesName = 'death-swap' }
 
