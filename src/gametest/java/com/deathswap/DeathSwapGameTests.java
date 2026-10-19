@@ -243,13 +243,111 @@ public final class DeathSwapGameTests {
     }
 
     @GameTest
+    public void startsWithListedNamesAndPreservesSelectorSupport(GameTestHelper helper) throws Exception {
+        var restore = isolateCommandPlayers(helper);
+        var a = commandPlayer(helper, 1); var b = commandPlayer(helper, 3); var c = commandPlayer(helper, 5);
+        var server = helper.getLevel().getServer();
+        var game = DeathSwapMod.game(server);
+        var dispatcher = server.getCommands().getDispatcher();
+        var source = a.createCommandSourceStack().withPermission(LevelBasedPermissionSet.GAMEMASTER);
+        String names = a.getPlainTextName() + " " + b.getPlainTextName();
+        try {
+            helper.assertTrue(dispatcher.execute("deathswap start " + names, source) == 1,
+                    "Two space-separated names start a match");
+            helper.assertTrue(game.isActiveParticipant(a.getUUID()) && game.isActiveParticipant(b.getUUID())
+                    && !game.isActiveParticipant(c.getUUID()), "Only the listed players participate");
+            game.stop("Test cleanup");
+            helper.assertTrue(dispatcher.execute("deathswap start " + names + " " + c.getPlainTextName()
+                    + " " + a.getPlainTextName(), source) == 1, "Longer lists allow repeated names");
+            helper.assertTrue(game.isActiveParticipant(c.getUUID()) && game.status().startsWith("3 players remain"),
+                    "Each selected player is included once");
+            game.stop("Test cleanup");
+            helper.assertTrue(dispatcher.execute("deathswap start " + names + " MissingPlayer", source) == 0
+                    && !game.running(), "Unknown names do not partially start a match");
+            helper.assertTrue(dispatcher.execute("deathswap start @a[gamemode=survival]", source) == 1,
+                    "Existing selector syntax still starts a match");
+            for (String prefix : List.of("deathswap start " + a.getPlainTextName() + " Cmd",
+                    "deathswap start " + names + " Cmd")) {
+                var suggestions = dispatcher.getCompletionSuggestions(dispatcher.parse(prefix, source)).get();
+                helper.assertTrue(suggestions.getList().stream().anyMatch(s -> s.getText().equals(c.getPlainTextName())),
+                        "Additional player names have tab completion");
+            }
+        } finally {
+            game.stop("Test cleanup");
+            restore.run();
+        }
+        helper.succeed();
+    }
+
+    @GameTest
+    public void exceptStartsWithOtherEligiblePlayersOnly(GameTestHelper helper) throws Exception {
+        var restore = isolateCommandPlayers(helper);
+        var a = commandPlayer(helper, 1); var b = commandPlayer(helper, 3); var excluded = commandPlayer(helper, 5);
+        var creative = commandPlayer(helper, 7);
+        creative.setGameMode(GameType.CREATIVE);
+        var server = helper.getLevel().getServer();
+        var game = DeathSwapMod.game(server);
+        var dispatcher = server.getCommands().getDispatcher();
+        var source = a.createCommandSourceStack().withPermission(LevelBasedPermissionSet.GAMEMASTER);
+        Vec3 excludedPosition = excluded.position();
+        try {
+            helper.assertTrue(dispatcher.execute("deathswap except " + excluded.getPlainTextName(), source) == 1,
+                    "Except starts a match immediately");
+            helper.assertTrue(game.isActiveParticipant(a.getUUID()) && game.isActiveParticipant(b.getUUID())
+                    && !game.isActiveParticipant(excluded.getUUID()) && !game.isActiveParticipant(creative.getUUID()),
+                    "Only other living survival players participate");
+            game.swapNow();
+            helper.assertTrue(excluded.position().equals(excludedPosition) && excluded.gameMode() == GameType.SURVIVAL,
+                    "Excluded player is neither swapped nor forced into spectator mode");
+            game.stop("Test cleanup");
+            helper.assertTrue(dispatcher.execute("deathswap start", source) == 1
+                    && game.isActiveParticipant(excluded.getUUID()), "Exclusion does not carry over to later matches");
+        } finally {
+            game.stop("Test cleanup");
+            restore.run();
+        }
+        helper.succeed();
+    }
+
+    @GameTest
+    public void exceptRejectsTooFewPlayersUnknownNamesAndManagedRounds(GameTestHelper helper) throws Exception {
+        var restore = isolateCommandPlayers(helper);
+        var a = commandPlayer(helper, 1); var b = commandPlayer(helper, 3);
+        var server = helper.getLevel().getServer();
+        var game = DeathSwapMod.game(server);
+        var dispatcher = server.getCommands().getDispatcher();
+        var source = a.createCommandSourceStack().withPermission(LevelBasedPermissionSet.GAMEMASTER);
+        try {
+            helper.assertTrue(dispatcher.execute("deathswap except " + a.getPlainTextName(), source) == 0
+                    && !game.running(), "Excluding one of two players cannot start a match");
+            try {
+                dispatcher.execute("deathswap except MissingPlayer", source);
+                throw new AssertionError("Unknown excluded player accepted");
+            } catch (com.mojang.brigadier.exceptions.CommandSyntaxException expected) { }
+            helper.assertTrue(!game.running(), "Unknown excluded player does not start a match");
+            commandPlayer(helper, 5);
+            game.setManagedNetwork(true);
+            helper.assertTrue(dispatcher.execute("deathswap except " + a.getPlainTextName(), source) == 0,
+                    "Except cannot override managed rounds");
+            helper.assertTrue(dispatcher.execute("deathswap start " + a.getPlainTextName() + " " + b.getPlainTextName(),
+                    source) == 0 && !game.running(), "Listed names cannot override managed rounds");
+        } finally {
+            game.setManagedNetwork(false);
+            game.stop("Test cleanup");
+            restore.run();
+        }
+        helper.succeed();
+    }
+
+    @GameTest
     public void commandsRequireOperatorPermission(GameTestHelper helper) throws Exception {
         var player = player(helper, 1);
         var dispatcher = helper.getLevel().getServer().getCommands().getDispatcher();
         var operator = player.createCommandSourceStack().withPermission(LevelBasedPermissionSet.GAMEMASTER);
         var denied = player.createCommandSourceStack().withPermission(PermissionSet.NO_PERMISSIONS);
         helper.assertTrue(dispatcher.execute("deathswap status", denied) == 1, "Everyone can inspect status");
-        for (String command : List.of("deathswap start", "deathswap stop", "deathswap swap", "deathswap interval 10")) {
+        for (String command : List.of("deathswap start", "deathswap start DeathSwapTest1 DeathSwapTest3",
+                "deathswap except DeathSwapTest1", "deathswap stop", "deathswap swap", "deathswap interval 10")) {
             try {
                 dispatcher.execute(command, denied);
                 throw new AssertionError("Non-operator command allowed: " + command);
@@ -260,9 +358,28 @@ public final class DeathSwapGameTests {
         helper.succeed();
     }
 
+    // Existing GameTests can still have mock players online while another test runs.
+    // Keep command tests' automatic selection independent of those fixtures.
+    private static Runnable isolateCommandPlayers(GameTestHelper helper) {
+        Map<ServerPlayer, GameType> modes = new HashMap<>();
+        for (var player : helper.getLevel().getServer().getPlayerList().getPlayers()) {
+            modes.put(player, player.gameMode());
+            player.setGameMode(GameType.CREATIVE);
+        }
+        return () -> modes.forEach(ServerPlayer::setGameMode);
+    }
+
+    private static ServerPlayer commandPlayer(GameTestHelper helper, int x) {
+        return player(helper, x, "Cmd" + x + UUID.randomUUID().toString().substring(0, 8));
+    }
+
     private static ServerPlayer player(GameTestHelper helper, int x) {
+        return player(helper, x, "DeathSwapTest" + x);
+    }
+
+    private static ServerPlayer player(GameTestHelper helper, int x, String name) {
         var server = helper.getLevel().getServer();
-        var cookie = CommonListenerCookie.createInitial(new GameProfile(UUID.randomUUID(), "DeathSwapTest" + x), false);
+        var cookie = CommonListenerCookie.createInitial(new GameProfile(UUID.randomUUID(), name), false);
         var player = new ServerPlayer(server, helper.getLevel(), cookie.gameProfile(), cookie.clientInformation());
         var connection = new Connection(PacketFlow.SERVERBOUND);
         var channel = new EmbeddedChannel(connection);

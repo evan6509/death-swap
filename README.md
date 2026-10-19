@@ -25,9 +25,12 @@ spread players, refill health, or change gamerules or PvP settings.
 
 1. Put participants in survival mode.
 2. Optionally run `/deathswap interval 300` to choose the time between swaps.
-3. Run `/deathswap start` to include every online, living survival player, or
-   select participants with `/deathswap start @a[gamemode=survival]`. Selectors
-   can narrow the match to particular players or scoreboard teams.
+3. Run `/deathswap start` to include every online, living survival player.
+   Use `/deathswap start brxydxn1 Hotwheels1130` to pick players by name, or
+   `/deathswap except username` to start with everyone eligible except that
+   online player. Exclusion applies only to the match being started and does
+   not change the excluded player's game mode. At least two participants must
+   remain. Selectors such as `/deathswap start @a[gamemode=survival]` still work.
 4. Build a trap before the next swap. A chat countdown announces the last ten
    seconds. The default interval is five minutes, measured in server ticks.
 5. On each swap, everyone receives another surviving player's exact location
@@ -57,14 +60,15 @@ themselves do not resume after a restart.
 
 In Docker mode, rounds start and rotate automatically. `/deathswap status` and
 `/deathswapnetwork status` report gameplay and proxy progress; `/deathswap swap`
-can force a location swap during an active, unpaused round. Start, stop, and
+can force a location swap during an active, unpaused round. Start, except, stop, and
 interval commands are for ordinary single-server mode. Change Docker timing in
 `.env` and recreate the services with `./docker/compose.py up -d`.
 
 | Command | Purpose | Permission |
 | --- | --- | --- |
 | `/deathswap` or `/deathswap status` | Show survivors, time remaining, and swaps | Everyone |
-| `/deathswap start [players]` | Start with all survival players or a selector | Operator level 2 |
+| `/deathswap start [players] [additional names...]` | Start with all eligible players, a selector, or listed online names | Operator level 2 |
+| `/deathswap except <username>` | Start with all eligible players except the named online player | Operator level 2 |
 | `/deathswap stop` | Cancel the match and restore spectators | Operator level 2 |
 | `/deathswap swap` | Force a swap and reset the timer | Operator level 2 |
 | `/deathswap interval <seconds>` | Set the next match's interval, 10–86400 seconds | Operator level 2 |
