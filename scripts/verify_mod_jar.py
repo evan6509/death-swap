@@ -1,25 +1,47 @@
 #!/usr/bin/env python3
-"""Check the distributable JAR, including its entrypoint and target versions."""
+"""Check the installable Fabric JAR, including target, version, and server code."""
 import json
+import os
 from pathlib import Path
+import sys
 import zipfile
 
-root = Path(__file__).resolve().parents[1]
-properties = dict(line.split("=", 1) for line in (root / "gradle.properties").read_text().splitlines() if "=" in line)
-expected_version = f"{properties['mod_version']}+mc{properties['minecraft_version']}"
-jar = root / "build" / "libs" / f"death-swap-{expected_version}.jar"
-assert jar.is_file(), f"Missing distributable: {jar}"
-with zipfile.ZipFile(jar) as archive:
-    names = set(archive.namelist())
-    metadata = json.loads(archive.read("fabric.mod.json"))
-    assert metadata["id"] == "deathswap"
-    assert metadata["version"] == expected_version
-    assert metadata["depends"]["minecraft"] == "26.2"
-    assert metadata["entrypoints"]["main"] == ["com.deathswap.DeathSwapMod"]
-    assert "com/deathswap/DeathSwapMod.class" in names
-    assert "com/deathswap/DeathSwapGame.class" in names
-    assert "LICENSE" in names
-    assert not any("GameTests" in name or "RulesTests" in name for name in names), "Test code leaked into mod"
-    assert b"net/minecraft/client/" not in b"".join(archive.read(name) for name in names if name.endswith(".class")), "Client classes in server mod"
-    assert int.from_bytes(archive.read("com/deathswap/DeathSwapMod.class")[6:8], "big") == 69, "Expected Java 25 bytecode"
-print(f"Verified {jar.name}: metadata, Java 25, server-only code, and production classes.")
+from release_version import parse_version, properties
+
+
+def verify(directory="build/libs", version=None):
+    props = properties()
+    version = version or os.environ.get("DEATHSWAP_VERSION", props["mod_version"])
+    parse_version(version)
+    expected = f"{version}+mc{props['minecraft_version']}"
+    jar = Path(directory) / f"death-swap-{expected}.jar"
+    if not jar.is_file() or not jar.stat().st_size:
+        raise ValueError(f"Missing or empty distributable: {jar}")
+    with zipfile.ZipFile(jar) as archive:
+        names = archive.namelist()
+        if archive.testzip() or len(names) != len(set(names)):
+            raise ValueError("Corrupt or duplicate JAR entries")
+        metadata = json.loads(archive.read("fabric.mod.json"))
+        if (metadata["id"] != "deathswap" or metadata["version"] != expected
+                or metadata["depends"]["minecraft"] != "26.2"
+                or metadata["depends"]["java"] != ">=25"
+                or metadata["entrypoints"]["main"] != ["com.deathswap.DeathSwapMod"]):
+            raise ValueError("Incorrect Fabric identity, embedded version, entrypoint, or target")
+        required = {"LICENSE", "com/deathswap/DeathSwapMod.class", "com/deathswap/DeathSwapGame.class"}
+        if not required <= set(names) or any(not archive.read(name) for name in required):
+            raise ValueError("Missing or empty production files")
+        for name in names:
+            if name.endswith(("Test.class", "Tests.class")):
+                raise ValueError("Test code leaked into mod")
+            if name.endswith(".class"):
+                data = archive.read(name)
+                if data[:4] != b"\xca\xfe\xba\xbe" or int.from_bytes(data[6:8], "big") != 69:
+                    raise ValueError(f"Expected Java 25 bytecode: {name}")
+                if b"net/minecraft/client/" in data:
+                    raise ValueError("Client classes in server mod")
+    return jar, metadata
+
+
+if __name__ == "__main__":
+    jar, _ = verify(sys.argv[1] if len(sys.argv) > 1 else "build/libs")
+    print(f"Verified {jar.name}: metadata, Java 25, server-only code, and production classes.")

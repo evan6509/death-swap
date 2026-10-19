@@ -1,8 +1,11 @@
 name: death-swap
 services:
   proxy:
-    build: .
-    image: death-swap:1.0.0
+    build:
+      context: .
+      args:
+        DEATHSWAP_VERSION: ${DEATHSWAP_VERSION:-1.0.0}
+    image: death-swap:${DEATHSWAP_VERSION:-1.0.0}
     environment:
       MODE: proxy
       # compose.py consumes the resolved count before launching services.
@@ -22,8 +25,11 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
   server-a:
-    build: .
-    image: death-swap:1.0.0
+    build:
+      context: .
+      args:
+        DEATHSWAP_VERSION: ${DEATHSWAP_VERSION:-1.0.0}
+    image: death-swap:${DEATHSWAP_VERSION:-1.0.0}
     environment:
       MODE: server
       SERVER_ID: a
@@ -40,8 +46,11 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
   server-b:
-    build: .
-    image: death-swap:1.0.0
+    build:
+      context: .
+      args:
+        DEATHSWAP_VERSION: ${DEATHSWAP_VERSION:-1.0.0}
+    image: death-swap:${DEATHSWAP_VERSION:-1.0.0}
     environment:
       MODE: server
       SERVER_ID: b
