@@ -99,14 +99,21 @@ def write_changelog(path, version, assets, metadata, notes, repository, commit, 
         encoding="utf-8")
 
 
-def verify_downloads(assets, downloaded):
-    expected = {asset.name for asset in assets}
+def verify_downloads(assets, downloaded, extra_names=()):
+    expected = {asset.name for asset in assets} | set(extra_names)
     actual = {path.name for path in Path(downloaded).iterdir()}
     if actual != expected:
         raise ValueError(f"Downloaded release asset set does not match the build: {sorted(actual)}")
     for asset in assets:
         if (Path(downloaded) / asset.name).read_bytes() != asset.read_bytes():
             raise ValueError(f"Downloaded release asset differs from the build: {asset.name}")
+
+
+def download_and_verify(repository, tag, assets, version, extra_names=()):
+    with tempfile.TemporaryDirectory(prefix="death-swap-release-") as downloaded:
+        gh("release", "download", tag, "--repo", repository, "--dir", downloaded)
+        verify_downloads(assets, downloaded, extra_names)
+        verify(downloaded, version)
 
 
 def main():
@@ -137,7 +144,10 @@ def main():
         uploaded = {asset["name"] for asset in existing["assets"] if asset["state"] == "uploaded"}
         if not required <= uploaded:
             raise ValueError("Published release is missing expected assets; leaving it unchanged")
-        print(f"Already published: {existing['html_url']}")
+        # Rebuilds must match the published binaries; the published notes retain
+        # their original release range and are covered by the downloaded manifest.
+        download_and_verify(repository, tag, build_assets, version, {"CHANGELOG.md", "SHA256SUMS"})
+        print(f"Already published and verified: {existing['html_url']}")
         return
 
     args = ["api", "--method", "POST", f"repos/{repository}/releases/generate-notes",
@@ -163,10 +173,7 @@ def main():
         # Only an unpublished draft can have its assets replaced on a retry.
         gh("release", "upload", tag, *(str(asset) for asset in assets), "--repo", repository, "--clobber")
         gh("release", "edit", tag, "--repo", repository, "--title", title, "--notes-file", str(changelog))
-    with tempfile.TemporaryDirectory(prefix="death-swap-release-") as downloaded:
-        gh("release", "download", tag, "--repo", repository, "--dir", downloaded)
-        verify_downloads(assets, downloaded)
-        verify(downloaded, version)
+    download_and_verify(repository, tag, assets, version)
     # Re-read before publication in case a newer release appeared during upload.
     pages = json.loads(gh("api", f"repos/{repository}/releases?per_page=100", "--paginate", "--slurp"))
     releases = [release for page in pages for release in page]

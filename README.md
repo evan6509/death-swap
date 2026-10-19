@@ -140,6 +140,10 @@ commit gets the next patch above all existing numeric `vMAJOR.MINOR.PATCH`
 tags/releases, including drafts. Raising `mod_version` above that history starts
 that requested version. Rerunning the same commit reuses its existing release
 or unfinished tag/draft; published assets and tags are never overwritten.
+Published-release retries download the existing assets, compare the three build
+deliverables byte for byte, and verify the published checksum manifest, notes,
+JAR metadata, and ZIP contents. Verification failures leave the release unchanged
+and fail the run; they do not silently accept matching asset names.
 API failures stop the workflow rather than resetting numbering.
 
 Main release runs hold one queue from version selection through publication

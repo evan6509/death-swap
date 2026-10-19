@@ -1,6 +1,7 @@
 """Release regression tests; GitHub mutations are simulated, never performed."""
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -14,6 +15,7 @@ from zipfile import ZipFile
 from deployment_archive import REQUIRED_FILES, create_archive, verify_archive
 import publish_release
 from release_version import parse_version, select_version
+from verify_release_assets import verify_checksums
 
 
 COMMIT = "a" * 40
@@ -127,7 +129,8 @@ class DeploymentArchiveTests(unittest.TestCase):
 
 class PublicationTests(unittest.TestCase):
     def run_publication(self, folder, existing=None, corrupt=False, api_failure=False, releases=(),
-                        version="1.0.0", unexpected_download=False, main_commit=COMMIT):
+                        version="1.0.0", unexpected_download=False, main_commit=COMMIT,
+                        missing_download=None, download_failure=False):
         directory = Path(folder)
         jar = directory / f"death-swap-{version}+mc26.2.jar"
         jar.write_bytes(b"verified installable jar fixture")
@@ -139,6 +142,13 @@ class PublicationTests(unittest.TestCase):
         metadata = dict(version=f"{version}+mc26.2", depends={"minecraft": "26.2", "fabricloader": ">=0.19.3",
                                                       "fabric-api": ">=0.154.2", "java": ">=25"})
         calls = []
+        verified_directories = []
+
+        def fake_verify(directory, version):
+            verified_directories.append(Path(directory))
+            if (Path(directory) / "SHA256SUMS").exists():
+                verify_checksums(directory)
+            return build_assets, metadata
 
         def fake_gh(*args):
             calls.append(args)
@@ -155,12 +165,26 @@ class PublicationTests(unittest.TestCase):
             if args[0] == "api" and "generate-notes" in args[3]:
                 return json.dumps(dict(body="## What's Changed\n- Test change in #1"))
             if args[:2] == ("release", "download"):
+                if download_failure:
+                    raise subprocess.CalledProcessError(1, ["gh", *args])
                 downloaded = Path(args[args.index("--dir") + 1])
-                for asset in [*build_assets, directory / "CHANGELOG.md", directory / "SHA256SUMS"]:
+                for asset in build_assets:
                     (downloaded / asset.name).write_bytes(asset.read_bytes())
+                if existing and not existing["draft"]:
+                    # Published notes stay original, even after newer releases.
+                    notes = downloaded / "CHANGELOG.md"
+                    notes.write_text("Original published release notes\n")
+                    (downloaded / "SHA256SUMS").write_text("".join(
+                        f"{hashlib.sha256(asset.read_bytes()).hexdigest()}  {asset.name}\n"
+                        for asset in [*(downloaded / asset.name for asset in build_assets), notes]))
+                else:
+                    for name in ["CHANGELOG.md", "SHA256SUMS"]:
+                        (downloaded / name).write_bytes((directory / name).read_bytes())
                 if corrupt:
-                    asset = build_assets[corrupt - 1] if isinstance(corrupt, int) else jar
-                    (downloaded / asset.name).write_bytes(b"corrupted download")
+                    names = [asset.name for asset in build_assets] + ["CHANGELOG.md", "SHA256SUMS"]
+                    (downloaded / names[int(corrupt) - 1]).write_bytes(b"corrupted download")
+                if missing_download:
+                    (downloaded / missing_download).unlink()
                 if unexpected_download:
                     (downloaded / "unexpected.jar").write_bytes(b"unexpected download")
             if args[:2] == ("release", "view"):
@@ -172,7 +196,7 @@ class PublicationTests(unittest.TestCase):
                    GITHUB_EVENT_NAME="push", GITHUB_REF="refs/heads/main")
         with patch.dict(os.environ, env, clear=True), patch("sys.argv", ["publish_release.py", folder]), \
                 patch.object(publish_release.subprocess, "check_output", return_value=COMMIT + "\n"), \
-                patch.object(publish_release, "verify", return_value=(build_assets, metadata)), \
+                patch.object(publish_release, "verify", side_effect=fake_verify), \
                 patch.object(publish_release, "commit_notes", return_value="- Direct commit change"), \
                 patch.object(publish_release, "tag_commit", return_value=COMMIT if existing and not existing["draft"] else None), \
                 patch.object(publish_release, "gh", side_effect=fake_gh), contextlib.redirect_stdout(io.StringIO()):
@@ -180,6 +204,7 @@ class PublicationTests(unittest.TestCase):
                 publish_release.main()
             finally:
                 self.calls = calls
+                self.verified_directories = verified_directories
         return calls
 
     def test_draft_download_verification_then_publication(self):
@@ -260,7 +285,37 @@ class PublicationTests(unittest.TestCase):
                                "death-swap-docker-1.0.0+mc26.2.zip", "CHANGELOG.md", "SHA256SUMS"]]
         with tempfile.TemporaryDirectory() as folder:
             calls = self.run_publication(folder, existing=existing, releases=[release("v1.0.1")])
-            self.assertFalse(any(call[0] == "release" for call in calls))
+            self.assertEqual([call[:2] for call in calls if call[0] == "release"],
+                             [("release", "download")])
+            self.assertEqual(len(self.verified_directories), 2)
+            self.assertNotEqual(self.verified_directories[0], self.verified_directories[1])
+            self.assertFalse(any("generate-notes" in " ".join(call) for call in calls))
+
+    def test_published_rerun_rejects_corruption_missing_and_extra_downloads(self):
+        existing = release("v1.0.0", COMMIT)
+        names = ["death-swap-1.0.0+mc26.2.jar", "death-swap-proxy-1.0.0.jar",
+                 "death-swap-docker-1.0.0+mc26.2.zip", "CHANGELOG.md", "SHA256SUMS"]
+        existing["assets"] = [dict(name=name, state="uploaded") for name in names]
+        cases = [dict(corrupt=index) for index in range(1, 6)]
+        cases += [dict(missing_download=name) for name in names]
+        cases += [dict(unexpected_download=True)]
+        for options in cases:
+            with self.subTest(options=options), tempfile.TemporaryDirectory() as folder:
+                with self.assertRaises(ValueError):
+                    self.run_publication(folder, existing=existing, **options)
+                self.assertEqual([call[:2] for call in self.calls if call[0] == "release"],
+                                 [("release", "download")])
+
+    def test_published_rerun_download_failure_fails_without_mutation(self):
+        existing = release("v1.0.0", COMMIT)
+        existing["assets"] = [dict(name=name, state="uploaded") for name in
+                              ["death-swap-1.0.0+mc26.2.jar", "death-swap-proxy-1.0.0.jar",
+                               "death-swap-docker-1.0.0+mc26.2.zip", "CHANGELOG.md", "SHA256SUMS"]]
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.run_publication(folder, existing=existing, download_failure=True)
+            self.assertEqual([call[:2] for call in self.calls if call[0] == "release"],
+                             [("release", "download")])
 
     def test_published_release_missing_plugin_is_left_unchanged(self):
         existing = release("v1.0.0", COMMIT)
