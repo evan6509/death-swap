@@ -3,6 +3,8 @@ package com.deathswap.proxy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class RoundControllerTest {
     @TempDir Path temporary;
-    private final long now = 100_000;
+    private long now = 100_000;
     private final FakeConnections connections = new FakeConnections();
     private NetworkConfig config;
     private RoundController controller;
@@ -138,6 +140,72 @@ class RoundControllerTest {
     }
 
     @Test
+    void resetRetriesPreserveAuthorizedRequestAcrossClockChangesAndRestart() throws Exception {
+        prepareAndConnect();
+        connections.finish(one, true);
+        connections.finish(two, true);
+        endRound();
+        controller.tick();
+        RoundController.Reset authorized = JsonFiles.read(config.resetFile("a"), RoundController.Reset.class);
+
+        // The supervisor can authorize this request while the proxy still sees an ended heartbeat.
+        now += 1_000;
+        controller.tick();
+        assertEquals(authorized, JsonFiles.read(config.resetFile("a"), RoundController.Reset.class),
+            "A retry must still match the supervisor's durable authorization receipt");
+
+        controller = new RoundController(config, stateFile, connections, () -> now);
+        now += 1_000;
+        controller.tick();
+        assertEquals(authorized, JsonFiles.read(config.resetFile("a"), RoundController.Reset.class),
+            "Proxy restart must replay the same authorized reset payload");
+        BackendStatus source = readStatus("a");
+        source.state = "resetting";
+        source.updatedAt = now;
+        source.resetRequestId = authorized.requestId();
+        JsonFiles.write(config.statusFile("a"), source);
+        controller.tick();
+        assertNull(persisted().transfer);
+        assertEquals("b", persisted().activeServer);
+    }
+
+    @Test
+    void legacyResetTransactionPreservesPendingRequestTimestamp() throws Exception {
+        prepareAndConnect();
+        connections.finish(one, true);
+        connections.finish(two, true);
+        endRound();
+        controller.tick();
+        RoundController.Reset authorized = JsonFiles.read(config.resetFile("a"), RoundController.Reset.class);
+        var legacy = com.google.gson.JsonParser.parseString(Files.readString(stateFile)).getAsJsonObject();
+        legacy.getAsJsonObject("transfer").remove("resetRequestedAt");
+        JsonFiles.write(stateFile, legacy);
+
+        now += 1_000;
+        controller = new RoundController(config, stateFile, connections, () -> now);
+        controller.tick();
+        assertEquals(authorized, JsonFiles.read(config.resetFile("a"), RoundController.Reset.class),
+            "Upgrading an in-flight transaction must retain its existing reset timestamp");
+    }
+
+    @Test
+    void resetTimestampSurvivesRestartBeforeRequestFileIsWritten() throws Exception {
+        prepareAndConnect();
+        connections.finish(one, true);
+        connections.finish(two, true);
+        endRound();
+        controller.tick();
+        RoundController.Reset original = JsonFiles.read(config.resetFile("a"), RoundController.Reset.class);
+        // Simulate a crash after persisting the transaction but before publishing the request.
+        Files.delete(config.resetFile("a"));
+
+        now += 1_000;
+        controller = new RoundController(config, stateFile, connections, () -> now);
+        controller.tick();
+        assertEquals(original, JsonFiles.read(config.resetFile("a"), RoundController.Reset.class));
+    }
+
+    @Test
     void disconnectedPlayersArePrunedBeforeDestinationStarts() throws Exception {
         endRound();
         controller.tick();
@@ -152,6 +220,47 @@ class RoundControllerTest {
         acknowledgeDestination();
         controller.tick();
         assertEquals(Set.of(one), connections.attempts.keySet());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"running", "waiting", "ended"})
+    void startedDestinationReconcilesLateRosterUpdateAfterProxyRestart(String destinationState) throws Exception {
+        boolean lobby = "waiting".equals(destinationState);
+        if (lobby) connections.locations.remove(two);
+        prepareAndConnect();
+        connections.finish(one, true);
+        if (!lobby) connections.finish(two, true);
+        endRound();
+        RoundController.Control original = control("b");
+        connections.beforeOnlinePlayers = () -> {
+            connections.locations.remove(lobby ? one : two);
+            try {
+                writeStatus("b", destinationState, original.roundId(), original.commandId(), original.participants());
+            } catch (Exception e) { throw new RuntimeException(e); }
+        };
+        // The destination starts after refreshStatuses reads prepared, before onlineRoster reads the disconnect.
+        controller.tick();
+        RoundController.Control replacement = control("b");
+        assertNotEquals(original.commandId(), replacement.commandId());
+        assertEquals(lobby ? List.of() : List.of(one.toString()), replacement.participants());
+        assertFalse(Files.exists(config.resetFile("a")));
+
+        controller = new RoundController(config, stateFile, connections, () -> now);
+        controller.tick();
+        assertEquals("b", controller.route().orElseThrow(),
+            "A destination that finalized the same round must remain routable under its original command");
+        assertEquals("resetting", persisted().transfer.phase);
+        assertEquals(original.commandId(), persisted().transfer.commandId);
+        assertEquals(original.participants(), persisted().transfer.participants);
+        RoundController.Reset reset = JsonFiles.read(config.resetFile("a"), RoundController.Reset.class);
+        BackendStatus source = readStatus("a");
+        source.state = "resetting";
+        source.resetRequestId = reset.requestId();
+        JsonFiles.write(config.statusFile("a"), source);
+        controller.tick();
+        assertNull(persisted().transfer);
+        assertEquals("b", controller.route().orElseThrow());
+        assertEquals(original.participants(), readStatus("b").participants);
     }
 
     @Test
@@ -296,6 +405,7 @@ class RoundControllerTest {
         final Map<UUID, CompletableFuture<Boolean>> attempts = new HashMap<>();
         final Map<UUID, Integer> attemptCount = new HashMap<>();
         final Map<UUID, String> targets = new HashMap<>();
+        Runnable beforeOnlinePlayers;
 
         @Override public boolean registered(String backend) { return Set.of("a", "b").contains(backend); }
         @Override public Set<UUID> playersOn(String backend) {
@@ -303,7 +413,12 @@ class RoundControllerTest {
             locations.forEach((uuid, server) -> { if (backend.equals(server)) players.add(uuid); });
             return players;
         }
-        @Override public Set<UUID> onlinePlayers() { return Set.copyOf(locations.keySet()); }
+        @Override public Set<UUID> onlinePlayers() {
+            Runnable action = beforeOnlinePlayers;
+            beforeOnlinePlayers = null;
+            if (action != null) action.run();
+            return Set.copyOf(locations.keySet());
+        }
         @Override public String currentServer(UUID player) { return locations.get(player); }
         @Override public CompletableFuture<Boolean> connect(UUID player, String backend) {
             CompletableFuture<Boolean> result = new CompletableFuture<>();

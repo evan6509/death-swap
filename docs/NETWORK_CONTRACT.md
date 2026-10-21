@@ -59,6 +59,11 @@ accepted commands in `status.commandId`. Repeated IDs are idempotent.
   prepared to remove players who disconnected during transfer; a different
   round cannot claim a used world.
 
+If the destination leaves `prepared` before a roster update arrives, the proxy
+reconciles the same reserved round and generation against the heartbeat's
+acknowledged command and actual roster. Running participants remain in that
+round and can reconnect to resume it; a late update cannot strand the transfer.
+
 The proxy waits for destination acknowledgment before creating connection
 requests. All connected players on the source (including observers) move
 together and join the next round. Late joiners in a running world observe until
@@ -82,6 +87,8 @@ Only after everyone has left the source does the proxy atomically write
 (UUID), `requestedAt` (Unix milliseconds). The backend must be `ended`, have
 zero players, and match server/generation before entering terminal `resetting`
 and reporting the exact `resetRequestId`.
+The proxy persists the request timestamp with its ID and replays the identical
+request on retries and proxy restarts so a durable authorization remains valid.
 
 The supervisor requires a fresh zero-player `resetting` heartbeat with that
 exact request ID and generation, and persists `reset.authorized.json` before

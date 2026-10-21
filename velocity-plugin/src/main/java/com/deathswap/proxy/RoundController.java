@@ -166,10 +166,17 @@ final class RoundController {
         }
         if ("preparing".equals(t.phase)) {
             writeControl(t.destination, t.destinationGeneration, t.commandId, "prepare", t.roundId, t.participants);
-            if (!t.commandId.equals(destination.commandId) || !t.roundId.equals(destination.roundId)
-                || !Set.of("prepared", "running", "waiting", "ended").contains(destination.state)) return;
+            // A cached prepared heartbeat can race start. The backend owns a finalized round's roster.
+            boolean finalized = t.roundId.equals(destination.roundId) && BackendStatus.uuid(destination.commandId)
+                && Set.of("running", "waiting", "ended").contains(destination.state);
+            if (!finalized && (!t.commandId.equals(destination.commandId) || !t.roundId.equals(destination.roundId)
+                || !"prepared".equals(destination.state))) return;
             State next = state.copy();
             next.transfer.phase = "connecting";
+            if (finalized) {
+                next.transfer.commandId = destination.commandId;
+                next.transfer.participants = new ArrayList<>(destination.participants);
+            }
             commit(next);
             t = state.transfer;
         }
@@ -188,6 +195,7 @@ final class RoundController {
         State next = state.copy();
         next.transfer.phase = "resetting";
         next.transfer.resetRequestId = id();
+        next.transfer.resetRequestedAt = clock.getAsLong();
         commit(next);
         writeReset(state.transfer);
     }
@@ -300,8 +308,23 @@ final class RoundController {
     }
 
     private void writeReset(Transfer t) throws IOException {
+        if (t.resetRequestedAt == null) {
+            // Upgrade an in-flight transaction without invalidating an existing supervisor receipt.
+            long requestedAt = clock.getAsLong();
+            if (Files.exists(config.resetFile(t.source))) {
+                Reset pending = JsonFiles.read(config.resetFile(t.source), Reset.class);
+                if (pending.schemaVersion() != 1 || !config.backendServers.get(t.source).serverId.equals(pending.serverId())
+                    || !t.sourceGeneration.equals(pending.generationId()) || !t.resetRequestId.equals(pending.requestId())
+                    || pending.requestedAt() < 0) throw new IOException("Pending reset does not match transfer transaction");
+                requestedAt = pending.requestedAt();
+            }
+            State next = state.copy();
+            next.transfer.resetRequestedAt = requestedAt;
+            commit(next);
+            t = state.transfer;
+        }
         JsonFiles.write(config.resetFile(t.source), new Reset(1, config.backendServers.get(t.source).serverId,
-            t.sourceGeneration, t.resetRequestId, clock.getAsLong()));
+            t.sourceGeneration, t.resetRequestId, t.resetRequestedAt));
     }
 
     private void commit(State next) throws IOException {
@@ -337,7 +360,8 @@ final class RoundController {
             || !BackendStatus.uuid(t.destinationGeneration) || !BackendStatus.uuid(t.commandId)
             || !state.usedGenerations.contains(t.destinationGeneration))) throw new IOException("Invalid reserved destination");
         if ((t.destination == null && !"waiting".equals(t.phase))
-            || ("resetting".equals(t.phase) && !BackendStatus.uuid(t.resetRequestId))) {
+            || ("resetting".equals(t.phase) && !BackendStatus.uuid(t.resetRequestId))
+            || t.resetRequestedAt != null && t.resetRequestedAt < 0) {
             throw new IOException("Invalid transaction phase");
         }
     }
@@ -385,6 +409,7 @@ final class RoundController {
         List<String> participants = new ArrayList<>();
         String phase;
         String resetRequestId;
+        Long resetRequestedAt;
 
         Transfer copy() {
             Transfer copy = new Transfer();
@@ -398,6 +423,7 @@ final class RoundController {
             copy.participants = new ArrayList<>(participants);
             copy.phase = phase;
             copy.resetRequestId = resetRequestId;
+            copy.resetRequestedAt = resetRequestedAt;
             return copy;
         }
     }
