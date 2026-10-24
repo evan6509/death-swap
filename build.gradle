@@ -2,21 +2,32 @@ plugins {
     id 'net.fabricmc.fabric-loom' version '1.17.14'
 }
 
+// Keep 26.2 as the default, including the existing Docker/release path.
+ext.minecraftTarget = System.getenv('DEATHSWAP_MINECRAFT') ?: project.minecraft_version
+if (!(minecraftTarget in ['26.2', '26.3'])) {
+    throw new GradleException("Unsupported Minecraft target: ${minecraftTarget}")
+}
+ext.fabricTarget = minecraftTarget == '26.2' ? project.fabric_version : project.fabric_version_26_3
+if (minecraftTarget != '26.2') {
+    layout.buildDirectory = file("build/${minecraftTarget}")
+}
 ext.releaseVersion = System.getenv('DEATHSWAP_VERSION') ?: project.mod_version
-version = "${releaseVersion}+mc${project.minecraft_version}"
+version = "${releaseVersion}+mc${minecraftTarget}"
 group = 'com.deathswap'
 base { archivesName = 'death-swap' }
 
 repositories { mavenCentral() }
 dependencies {
-    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    minecraft "com.mojang:minecraft:${minecraftTarget}"
     implementation "net.fabricmc:fabric-loader:${project.loader_version}"
-    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${fabricTarget}"
 }
 
 processResources {
     inputs.property 'version', project.version
-    filesMatching('fabric.mod.json') { expand version: project.version }
+    inputs.property 'minecraft', minecraftTarget
+    inputs.property 'fabricApi', fabricTarget.split('\\+')[0]
+    filesMatching('fabric.mod.json') { expand version: project.version, minecraft: minecraftTarget, fabricApi: fabricTarget.split('\\+')[0] }
 }
 
 java {
@@ -53,7 +64,7 @@ loom {
             source sourceSets.gametest
             vmArg '-Dfabric-api.gametest'
             vmArg "-Dfabric-api.gametest.report-file=${layout.buildDirectory.get()}/gametest-results.xml"
-            runDir 'build/gametest'
+            runDir "${layout.buildDirectory.get()}/gametest"
         }
     }
 }

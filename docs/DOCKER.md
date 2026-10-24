@@ -14,6 +14,9 @@ alone pauses the active match rather than generating another seed. Late joiners
 observe until the next round. Ordinary server restarts preserve each world's
 seed; only an authorized round reset changes it.
 
+The standalone mod also has a 26.3 build. This deployment bundle and its
+forwarding dependencies remain pinned to 26.2; see [COMPATIBILITY.md](COMPATIBILITY.md).
+
 ## Start
 
 Install Docker Engine with the Compose v2 plugin (or Docker Desktop) and Python 3

@@ -1,6 +1,7 @@
 # Death Swap development
 
-- Target Minecraft 26.2, Fabric, and Java 25.
+- Target Minecraft 26.2 (default) and 26.3, Fabric, and Java 25.
+- Build both targets sequentially with separate project caches; select 26.3 with `DEATHSWAP_MINECRAFT=26.3`. Keep the Docker deployment on 26.2.
 - Use `codex/development` as the long-lived working branch, matching the user's other repositories.
 - Commit routine implementation and fixes on `codex/development`; propose integration through a reviewed pull request into `main`.
 - Do not merge into, push directly to, or publish from `main` without explicit user approval.

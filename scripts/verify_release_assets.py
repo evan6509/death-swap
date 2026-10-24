@@ -38,7 +38,8 @@ def verify(directory, version=None):
     mod_name = f"death-swap-{full_version}.jar"
     plugin_name = f"death-swap-proxy-{version}.jar"
     docker_name = f"death-swap-docker-{full_version}.zip"
-    expected = {mod_name, plugin_name, docker_name}
+    mod263_name = f"death-swap-{version}+mc26.3.jar"
+    expected = {mod_name, mod263_name, plugin_name, docker_name}
     present = {path.name for path in directory.iterdir()}
     if not expected <= present or present - expected - {"CHANGELOG.md", "SHA256SUMS"}:
         raise ValueError(f"Expected exact release assets {sorted(expected)}; found {sorted(present)}")
@@ -46,10 +47,11 @@ def verify(directory, version=None):
         if not {"CHANGELOG.md", "SHA256SUMS"} <= present or not (directory / "CHANGELOG.md").stat().st_size:
             raise ValueError("Missing release notes or checksums")
         verify_checksums(directory)
-    mod, metadata = verify_mod(directory, version)
+    mod, metadata = verify_mod(directory, version, minecraft="26.2")
+    mod263, _ = verify_mod(directory, version, minecraft="26.3")
     plugin, _ = verify_velocity(directory, version)
     deployment = verify_archive(directory / docker_name, version)
-    return [mod, plugin, deployment], metadata
+    return [mod, plugin, deployment, mod263], metadata
 
 
 def main():

@@ -46,7 +46,7 @@ jobs:
     needs: version
     if: ${{ !cancelled() && (needs.version.result == 'success' || needs.version.result == 'skipped') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -69,6 +69,10 @@ jobs:
           cache-provider: basic
       - name: Test release helpers
         run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
+      - name: Test release helpers with Minecraft 26.3 selection
+        env:
+          DEATHSWAP_MINECRAFT: '26.3'
+        run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
       - name: Test Docker rotation controller
         run: python3 -m unittest discover -s docker -p 'test_*.py' -v
       - name: Validate Docker Compose configuration
@@ -78,9 +82,18 @@ jobs:
         run: docker compose config --quiet
       - name: Check entrypoint shell syntax
         run: sh -n docker/entrypoint.sh
-      - name: Build and test the mod and Velocity plugin
-        run: ./gradlew --no-daemon clean build runGametest
+      # Sequential builds: the proxy project is shared. Preserve both mod outputs.
+      - name: Build and test Minecraft 26.2 and Velocity
+        run: ./gradlew --no-daemon --max-workers=1 --project-cache-dir .gradle/26.2 clean build runGametest
       - name: Verify Fabric mod
+        run: python3 scripts/verify_mod_jar.py
+      - name: Build and test Minecraft 26.3 and Velocity
+        env:
+          DEATHSWAP_MINECRAFT: '26.3'
+        run: ./gradlew --no-daemon --max-workers=1 --project-cache-dir .gradle/26.3 clean build runGametest
+      - name: Verify Fabric mod for Minecraft 26.3
+        env:
+          DEATHSWAP_MINECRAFT: '26.3'
         run: python3 scripts/verify_mod_jar.py
       - name: Verify Velocity plugin
         run: python3 scripts/verify_proxy_jar.py
@@ -101,6 +114,9 @@ jobs:
           path: |
             build/gametest-results.xml
             build/gametest/logs/latest.log
+            build/26.3/gametest-results.xml
+            build/26.3/gametest/logs/latest.log
+            build/26.3/reports/
             build/reports/
             velocity-plugin/build/reports/
           if-no-files-found: ignore

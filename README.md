@@ -1,6 +1,6 @@
 # Death Swap
 
-A server-side Fabric minigame for **Minecraft 26.2** and **Java 25**. Build traps,
+A server-side Fabric minigame for **Minecraft 26.2 or 26.3** and **Java 25**. Build traps,
 swap locations, and try to be the last player alive.
 
 For automatic fresh-seed rounds like Linked Hardcore, use the included
@@ -17,6 +17,11 @@ Install `death-swap-1.0.0+mc26.2.jar` from
 server with Loader `0.19.3` or newer. Players can connect without installing
 Death Swap on their clients. For a singleplayer/LAN world, install the mod and
 Fabric API on the host. A match needs at least two players.
+
+Development builds select an exact Minecraft target; use a matching server/client
+version and Fabric API. Minecraft 26.3 uses Fabric API `0.165.0+26.3` and the
+`+mc26.3.jar` artifact. The published v1.0.0 downloads above remain 26.2-only.
+The Docker deployment remains on 26.2. See [compatibility evidence](docs/COMPATIBILITY.md).
 
 ## Playing
 
@@ -84,8 +89,13 @@ The repository includes the Gradle wrapper; a separate Gradle installation is
 not required.
 
 ```sh
-./gradlew --no-daemon build runGametest
+# Export JAVA_HOME pointing to your JDK 25 installation first.
+# Build sequentially in this order: default clean removes the entire build/ tree.
+./gradlew --no-daemon --max-workers=1 --project-cache-dir .gradle/26.2 clean build runGametest
 python3 scripts/verify_mod_jar.py
+DEATHSWAP_MINECRAFT=26.3 ./gradlew --no-daemon --max-workers=1 --project-cache-dir .gradle/26.3 clean build runGametest
+DEATHSWAP_MINECRAFT=26.3 python3 scripts/verify_mod_jar.py
+python3 -m unittest discover -s scripts -p 'test_*.py' -v
 python3 scripts/verify_proxy_jar.py
 python3 docker/test_runtime.py
 sh -n docker/entrypoint.sh
@@ -93,8 +103,14 @@ sh -n docker/entrypoint.sh
 
 These are verification commands, not a record of a successful run.
 
-The local distributable is `build/libs/death-swap-1.0.0+mc26.2.jar`. Do not install the
-sources JAR. The build runs standalone match-rule and spectator-recovery
+The default local distributable is `build/libs/death-swap-1.0.0+mc26.2.jar`.
+Setting `DEATHSWAP_MINECRAFT=26.3` selects the matching Minecraft/Fabric API
+and writes `build/26.3/libs/death-swap-1.0.0+mc26.3.jar`, with its GameTest
+world, reports, resources, and compiled classes isolated under `build/26.3`.
+Only `26.2` and `26.3` are accepted. The default remains `26.2`.
+Both artifacts declare their exact Minecraft version, Loader `>=0.19.3`,
+and Java `>=25`; API floors are `>=0.154.2` and `>=0.165.0`, respectively.
+Do not install the sources JAR. The build runs standalone match-rule and spectator-recovery
 checks. GameTests exercise real server players over mock network connections,
 including location snapshots, dimensions, inventories, timers, elimination,
 recovery, managed-round arrivals, disconnect pauses, resets, restart handling,
@@ -133,15 +149,17 @@ Its uploaded assets are:
 `codex/development` includes unreleased reset-replay timestamp and round-start
 transfer-race fixes after that release. Its checked-in `mod_version` remains
 `1.0.0`, so a local build's filename alone does not identify the published bytes.
-Both the release and current branch target Minecraft **26.2**; no 26.3 support
-is declared. The automated checks described above do not establish connected-client
-play or a running Docker deployment.
+The release targets Minecraft **26.2**. The current branch also builds a separate
+**26.3** mod; it has not been published. The automated checks described above
+do not establish connected-client play or a running Docker deployment.
 
 Choose the appropriate artifact (where `VERSION` is the release version):
 
 - `death-swap-VERSION+mc26.2.jar`: install in the Fabric server's `mods` folder
   alongside Fabric API. This Java 25 JAR is independent of the host OS/CPU;
   players need no client mod. Do not install a sources JAR.
+- `death-swap-VERSION+mc26.3.jar`: matching mod for Minecraft 26.3 with Fabric
+  API `0.165.0+26.3`. Install only the mod JAR matching your Minecraft version.
 - `death-swap-proxy-VERSION.jar`: matching Java 25 Velocity 4.0 controller for
   fresh-world networks. It requires the matching mod and reset supervisor;
   use the Docker bundle for the complete setup.
@@ -161,7 +179,7 @@ commit gets the next patch above all existing numeric `vMAJOR.MINOR.PATCH`
 tags/releases, including drafts. Raising `mod_version` above that history starts
 that requested version. Rerunning the same commit reuses its existing release
 or unfinished tag/draft; published assets and tags are never overwritten.
-Published-release retries download the existing assets, compare the three build
+Published-release retries download the existing assets, compare the four build
 deliverables byte for byte, and verify the published checksum manifest, notes,
 JAR metadata, and ZIP contents. Verification failures leave the release unchanged
 and fail the run; they do not silently accept matching asset names.
@@ -169,8 +187,8 @@ API failures stop the workflow rather than resetting numbering.
 
 Main release runs hold one queue from version selection through publication
 (using GitHub's `queue: max`, up to 100 waiting runs). Each checks out the exact
-triggering SHA, builds and tests with its selected version, creates an unpublished
-draft, uploads assets, downloads them again, checks their exact bytes, checksum
+triggering SHA, builds and tests both Minecraft targets with its selected
+version, creates an unpublished draft, uploads assets, downloads them again, checks their exact bytes, checksum
 manifest, JAR metadata, and deployment ZIP contents, and then publishes. A failed
 verification leaves the draft unpublished for inspection/retry. Older retries
 cannot promote themselves over a newer stable release as Latest; only a release
@@ -194,8 +212,10 @@ python3 scripts/verify_release_assets.py build/release
 ```
 
 Use the same `DEATHSWAP_VERSION` for build, verification, and packaging when
-checking an overridden version. Packaging requires an empty `build/release`
-directory. Local validation does not establish a successful GitHub Actions run,
-published release, connected-client gameplay, or running Docker deployment.
+checking an overridden version. Packaging requires both target builds and an
+empty `build/release` directory. It stages both mod JARs, one shared proxy JAR, and the existing 26.2
+Docker source ZIP; no 26.3 Docker bundle is declared. Local validation does not
+establish a successful GitHub Actions run, published release, connected-client
+gameplay, or running Docker deployment.
 
 License: MIT.

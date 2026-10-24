@@ -138,7 +138,9 @@ class PublicationTests(unittest.TestCase):
         plugin.write_bytes(b"verified velocity plugin fixture")
         deployment = directory / f"death-swap-docker-{version}+mc26.2.zip"
         deployment.write_bytes(b"verified docker deployment fixture")
-        build_assets = [jar, plugin, deployment]
+        mod263 = directory / f"death-swap-{version}+mc26.3.jar"
+        mod263.write_bytes(b"verified 26.3 jar fixture")
+        build_assets = [jar, plugin, deployment, mod263]
         metadata = dict(version=f"{version}+mc26.2", depends={"minecraft": "26.2", "fabricloader": ">=0.19.3",
                                                       "fabric-api": ">=0.154.2", "java": ">=25"})
         calls = []
@@ -223,12 +225,14 @@ class PublicationTests(unittest.TestCase):
             self.assertIn("death-swap-proxy-1.0.0.jar", " ".join(creation))
             self.assertIn("death-swap-docker-1.0.0+mc26.2.zip", " ".join(creation))
             checksums = (Path(folder) / "SHA256SUMS").read_text()
-            self.assertEqual(len(checksums.splitlines()), 4)
+            self.assertEqual(len(checksums.splitlines()), 5)
             self.assertIn("death-swap-proxy", checksums)
             self.assertIn("death-swap-docker", checksums)
+            self.assertIn("death-swap-1.0.0+mc26.3.jar", (Path(folder) / "CHANGELOG.md").read_text())
+            self.assertIn("0.165.0+26.3", (Path(folder) / "CHANGELOG.md").read_text())
 
     def test_corrupt_download_is_not_published(self):
-        for asset in (1, 2, 3):
+        for asset in (1, 2, 3, 4):
             with self.subTest(asset=asset), tempfile.TemporaryDirectory() as folder:
                 with self.assertRaisesRegex(ValueError, "differs from the build"):
                     self.run_publication(folder, corrupt=asset)
@@ -282,7 +286,7 @@ class PublicationTests(unittest.TestCase):
         existing = release("v1.0.0", COMMIT)
         existing["assets"] = [dict(name=name, state="uploaded") for name in
                               ["death-swap-1.0.0+mc26.2.jar", "death-swap-proxy-1.0.0.jar",
-                               "death-swap-docker-1.0.0+mc26.2.zip", "CHANGELOG.md", "SHA256SUMS"]]
+                               "death-swap-docker-1.0.0+mc26.2.zip", "death-swap-1.0.0+mc26.3.jar", "CHANGELOG.md", "SHA256SUMS"]]
         with tempfile.TemporaryDirectory() as folder:
             calls = self.run_publication(folder, existing=existing, releases=[release("v1.0.1")])
             self.assertEqual([call[:2] for call in calls if call[0] == "release"],
@@ -294,9 +298,9 @@ class PublicationTests(unittest.TestCase):
     def test_published_rerun_rejects_corruption_missing_and_extra_downloads(self):
         existing = release("v1.0.0", COMMIT)
         names = ["death-swap-1.0.0+mc26.2.jar", "death-swap-proxy-1.0.0.jar",
-                 "death-swap-docker-1.0.0+mc26.2.zip", "CHANGELOG.md", "SHA256SUMS"]
+                 "death-swap-docker-1.0.0+mc26.2.zip", "death-swap-1.0.0+mc26.3.jar", "CHANGELOG.md", "SHA256SUMS"]
         existing["assets"] = [dict(name=name, state="uploaded") for name in names]
-        cases = [dict(corrupt=index) for index in range(1, 6)]
+        cases = [dict(corrupt=index) for index in range(1, 7)]
         cases += [dict(missing_download=name) for name in names]
         cases += [dict(unexpected_download=True)]
         for options in cases:
@@ -310,7 +314,7 @@ class PublicationTests(unittest.TestCase):
         existing = release("v1.0.0", COMMIT)
         existing["assets"] = [dict(name=name, state="uploaded") for name in
                               ["death-swap-1.0.0+mc26.2.jar", "death-swap-proxy-1.0.0.jar",
-                               "death-swap-docker-1.0.0+mc26.2.zip", "CHANGELOG.md", "SHA256SUMS"]]
+                               "death-swap-docker-1.0.0+mc26.2.zip", "death-swap-1.0.0+mc26.3.jar", "CHANGELOG.md", "SHA256SUMS"]]
         with tempfile.TemporaryDirectory() as folder:
             with self.assertRaises(subprocess.CalledProcessError):
                 self.run_publication(folder, existing=existing, download_failure=True)

@@ -9,11 +9,19 @@ import zipfile
 from release_version import parse_version, properties
 
 
-def verify(directory="build/libs", version=None):
+TARGETS = {"26.2": "0.154.2", "26.3": "0.165.0"}
+
+
+def verify(directory=None, version=None, minecraft=None):
     props = properties()
+    minecraft = minecraft or os.environ.get("DEATHSWAP_MINECRAFT", props["minecraft_version"])
+    if minecraft not in TARGETS:
+        raise ValueError(f"Unsupported Minecraft target: {minecraft}")
+    if directory is None:
+        directory = "build/libs" if minecraft == "26.2" else f"build/{minecraft}/libs"
     version = version or os.environ.get("DEATHSWAP_VERSION", props["mod_version"])
     parse_version(version)
-    expected = f"{version}+mc{props['minecraft_version']}"
+    expected = f"{version}+mc{minecraft}"
     jar = Path(directory) / f"death-swap-{expected}.jar"
     if not jar.is_file() or not jar.stat().st_size:
         raise ValueError(f"Missing or empty distributable: {jar}")
@@ -23,7 +31,9 @@ def verify(directory="build/libs", version=None):
             raise ValueError("Corrupt or duplicate JAR entries")
         metadata = json.loads(archive.read("fabric.mod.json"))
         if (metadata["id"] != "deathswap" or metadata["version"] != expected
-                or metadata["depends"]["minecraft"] != "26.2"
+                or metadata["depends"]["minecraft"] != minecraft
+                or metadata["depends"].get("fabricloader") != ">=0.19.3"
+                or metadata["depends"].get("fabric-api") != ">=" + TARGETS[minecraft]
                 or metadata["depends"]["java"] != ">=25"
                 or metadata["entrypoints"]["main"] != ["com.deathswap.DeathSwapMod"]):
             raise ValueError("Incorrect Fabric identity, embedded version, entrypoint, or target")
@@ -43,5 +53,5 @@ def verify(directory="build/libs", version=None):
 
 
 if __name__ == "__main__":
-    jar, _ = verify(sys.argv[1] if len(sys.argv) > 1 else "build/libs")
+    jar, _ = verify(sys.argv[1] if len(sys.argv) > 1 else None)
     print(f"Verified {jar.name}: metadata, Java 25, server-only code, and production classes.")

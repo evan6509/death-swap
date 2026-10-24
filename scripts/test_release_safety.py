@@ -1,5 +1,6 @@
 """Failure paths and artifact checks use only temporary files and mocked GitHub."""
 import hashlib
+from functools import partial
 import json
 import os
 from pathlib import Path
@@ -105,7 +106,7 @@ class ArtifactSafetyTests(unittest.TestCase):
         # Small class headers exercise metadata and artifact verification without Java compilation.
         bytecode = b"\xca\xfe\xba\xbe\x00\x00\x00\x45"
         metadata = dict(id="deathswap", version="1.0.1+mc26.2",
-                        depends=dict(minecraft="26.2", java=">=25"),
+                        depends=dict(minecraft="26.2", java=">=25", fabricloader=">=0.19.3", **{"fabric-api": ">=0.154.2"}),
                         entrypoints=dict(main=["com.deathswap.DeathSwapMod"]))
         for directory, filename, resource, info, classes in [
             ("build/libs", "death-swap-1.0.1+mc26.2.jar", "fabric.mod.json", metadata,
@@ -120,6 +121,18 @@ class ArtifactSafetyTests(unittest.TestCase):
                 archive.writestr("LICENSE", "MIT fixture")
                 for name in classes:
                     archive.writestr(name, bytecode)
+        original = root / "build/libs/death-swap-1.0.1+mc26.2.jar"
+        destination = root / "build/26.3/libs/death-swap-1.0.1+mc26.3.jar"
+        destination.parent.mkdir(parents=True)
+        with ZipFile(original) as source, ZipFile(destination, "w") as archive:
+            for name in source.namelist():
+                content = source.read(name)
+                if name == "fabric.mod.json":
+                    data = json.loads(content)
+                    data["version"] = "1.0.1+mc26.3"
+                    data["depends"].update(minecraft="26.3", **{"fabric-api": ">=0.165.0"})
+                    content = json.dumps(data)
+                archive.writestr(name, content)
         return root
 
     def test_staging_checks_required_deliverables_and_excludes_sources_and_secrets(self):
@@ -129,8 +142,8 @@ class ArtifactSafetyTests(unittest.TestCase):
             (root / "build/libs/death-swap-1.0.1+mc26.2-sources.jar").write_bytes(b"sources fixture")
             output = root / "build/release"
             assets = stage(root, output, "1.0.1")
-            self.assertEqual(len(assets), 3)
-            self.assertEqual(len(verify(output, "1.0.1")[0]), 3)
+            self.assertEqual(len(assets), 4)
+            self.assertEqual(len(verify(output, "1.0.1")[0]), 4)
             with ZipFile(assets[2]) as archive:
                 self.assertNotIn(".env", archive.namelist())
                 self.assertIn(b"mod_version=1.0.1", archive.read("gradle.properties"))
@@ -142,7 +155,10 @@ class ArtifactSafetyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root = self.fixture(folder)
             mod_dir, proxy_dir = root / "build/libs", root / "velocity-plugin/build/libs"
-            for directory, verifier in [(mod_dir, verify_mod), (proxy_dir, verify_proxy)]:
+            for directory, verifier in [
+                    (mod_dir, partial(verify_mod, minecraft="26.2")),
+                    (root / "build/26.3/libs", partial(verify_mod, minecraft="26.3")),
+                    (proxy_dir, verify_proxy)]:
                 jar = next(directory.glob("*.jar"))
                 original = jar.read_bytes()
                 with ZipFile(jar, "a") as archive:

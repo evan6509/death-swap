@@ -78,7 +78,7 @@ def commit_notes(previous, commit, repository):
 
 
 def write_changelog(path, version, assets, metadata, notes, repository, commit, commits):
-    jar, plugin, deployment = assets
+    jar, plugin, deployment, mod263 = assets
     depends = metadata["depends"]
     requirements = ", ".join(f"{name} `{depends[key]}`" for key, name in (
         ("minecraft", "Minecraft"), ("fabricloader", "Fabric Loader"),
@@ -87,8 +87,11 @@ def write_changelog(path, version, assets, metadata, notes, repository, commit, 
         f"# Death Swap {version}\n\n{notes.strip()}\n\n"
         f"## Commits\n\n{commits}\n\n"
         f"## Install\n\nDownload `{jar.name}` and put it in the server's `mods` folder.\n\n"
-        f"Requirements: {requirements}.\n\n"
-        f"For automatic fresh worlds, use `{deployment.name}`. Extract it, copy `.env.example` "
+        f"Requirements for the 26.2 JAR: {requirements}.\n\n"
+        f"For Minecraft 26.3, download `{mod263.name}` instead, with Fabric API "
+        f"`0.165.0+26.3`, Fabric Loader `>=0.19.3`, and Java `>=25`. "
+        f"Each mod JAR requires its exact Minecraft version.\n\n"
+        f"For automatic fresh worlds on Minecraft 26.2, use `{deployment.name}`. Extract it, copy `.env.example` "
         f"to `.env`, accept the Minecraft EULA and set a private forwarding secret there, "
         f"then run `./docker/compose.py up -d --build`. "
         f"The archive selects build version `{version}` and includes `docs/DOCKER.md`.\n\n"
@@ -164,7 +167,7 @@ def main():
         f"{hashlib.sha256(asset.read_bytes()).hexdigest()}  {asset.name}\n"
         for asset in [*build_assets, changelog]), encoding="utf-8")
     assets = [*build_assets, changelog, checksums]
-    title = f"Death Swap {version} (Minecraft {metadata['depends']['minecraft']})"
+    title = f"Death Swap {version} (Minecraft 26.2 / 26.3)"
     ensure_tag(repository, tag, commit)
     if existing is None:
         gh("release", "create", tag, *(str(asset) for asset in assets), "--repo", repository,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage both installable JARs and a clean Docker source deployment ZIP."""
+"""Stage both Minecraft JARs, the proxy JAR, and a clean Docker source deployment ZIP."""
 
 import os
 from pathlib import Path
@@ -17,12 +17,13 @@ def stage(root=".", destination="build/release", version=None):
     version = version or os.environ.get("DEATHSWAP_VERSION", props["mod_version"])
     root = Path(root)
     destination = Path(destination)
-    mod, _ = verify_mod(root / "build/libs", version)
+    mod, _ = verify_mod(root / "build/libs", version, minecraft="26.2")
+    mod263, _ = verify_mod(root / "build/26.3/libs", version, minecraft="26.3")
     plugin, _ = verify_velocity(root / "velocity-plugin/build/libs", version)
     destination.mkdir(parents=True, exist_ok=True)
     if any(destination.iterdir()):
         raise ValueError(f"Release staging directory must be empty: {destination}")
-    for source in (mod, plugin):
+    for source in (mod, mod263, plugin):
         shutil.copyfile(source, destination / source.name)
     create_archive(root, destination / f"death-swap-docker-{version}+mc{props['minecraft_version']}.zip", version)
     return verify(destination, version)[0]
