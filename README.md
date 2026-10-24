@@ -12,8 +12,8 @@ arrives and the start countdown finishes. Each fresh round starts with new
 player data and inventory. The single-server instructions below retain the
 ordinary elimination/last-survivor mode.
 
-Install `death-swap-VERSION+mc26.2.jar` from
-[Releases](https://github.com/evan6509/death-swap/releases) and Fabric API `0.154.2+26.2` on a Fabric
+Install `death-swap-1.0.0+mc26.2.jar` from
+[release v1.0.0](https://github.com/evan6509/death-swap/releases/tag/v1.0.0) and Fabric API `0.154.2+26.2` on a Fabric
 server with Loader `0.19.3` or newer. Players can connect without installing
 Death Swap on their clients. For a singleplayer/LAN world, install the mod and
 Fabric API on the host. A match needs at least two players.
@@ -88,9 +88,12 @@ not required.
 python3 scripts/verify_mod_jar.py
 python3 scripts/verify_proxy_jar.py
 python3 docker/test_runtime.py
+sh -n docker/entrypoint.sh
 ```
 
-The distributable is `build/libs/death-swap-1.0.0+mc26.2.jar`. Do not install the
+These are verification commands, not a record of a successful run.
+
+The local distributable is `build/libs/death-swap-1.0.0+mc26.2.jar`. Do not install the
 sources JAR. The build runs standalone match-rule and spectator-recovery
 checks. GameTests exercise real server players over mock network connections,
 including location snapshots, dimensions, inventories, timers, elimination,
@@ -117,7 +120,24 @@ workflow runs build, test, verify, and stage downloads without publishing.
 
 ## Releases and downloads
 
-Download from [GitHub Releases](https://github.com/evan6509/death-swap/releases):
+The current published release is [v1.0.0](https://github.com/evan6509/death-swap/releases/tag/v1.0.0),
+published **2026-10-19** from commit `b3f3fa42fdd7949b5257ff81c1c8f1d08266f208`.
+Its uploaded assets are:
+
+- [death-swap-1.0.0+mc26.2.jar](https://github.com/evan6509/death-swap/releases/download/v1.0.0/death-swap-1.0.0%2Bmc26.2.jar)
+- [death-swap-proxy-1.0.0.jar](https://github.com/evan6509/death-swap/releases/download/v1.0.0/death-swap-proxy-1.0.0.jar)
+- [death-swap-docker-1.0.0+mc26.2.zip](https://github.com/evan6509/death-swap/releases/download/v1.0.0/death-swap-docker-1.0.0%2Bmc26.2.zip)
+- [CHANGELOG.md](https://github.com/evan6509/death-swap/releases/download/v1.0.0/CHANGELOG.md)
+- [SHA256SUMS](https://github.com/evan6509/death-swap/releases/download/v1.0.0/SHA256SUMS)
+
+`codex/development` includes unreleased reset-replay timestamp and round-start
+transfer-race fixes after that release. Its checked-in `mod_version` remains
+`1.0.0`, so a local build's filename alone does not identify the published bytes.
+Both the release and current branch target Minecraft **26.2**; no 26.3 support
+is declared. The automated checks described above do not establish connected-client
+play or a running Docker deployment.
+
+Choose the appropriate artifact (where `VERSION` is the release version):
 
 - `death-swap-VERSION+mc26.2.jar`: install in the Fabric server's `mods` folder
   alongside Fabric API. This Java 25 JAR is independent of the host OS/CPU;
@@ -131,11 +151,12 @@ Download from [GitHub Releases](https://github.com/evan6509/death-swap/releases)
   set a private forwarding secret and accept the EULA, then follow
   [docs/DOCKER.md](docs/DOCKER.md). Docker builds the matching version and fetches
   server dependencies; no container image is published. Use a host supporting
-  the Java 25 base image and Docker Compose v2.
+  the Java 25 base image, Docker Compose v2, and Python 3 for the host-side helper.
 - `CHANGELOG.md` and `SHA256SUMS`: linked changes since the previous applicable
   stable release, installation requirements, source commit, and SHA-256 checksums.
 
-The first automatic tag is `v1.0.0` when no versions are reserved. Each new
+The initial automatic release was `v1.0.0`. When no versions are reserved,
+numbering starts at the checked-in `mod_version`. Each new
 commit gets the next patch above all existing numeric `vMAJOR.MINOR.PATCH`
 tags/releases, including drafts. Raising `mod_version` above that history starts
 that requested version. Rerunning the same commit reuses its existing release
